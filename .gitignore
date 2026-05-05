@@ -1,0 +1,4 @@
+incident_report.txt
+blacklist.txt
+__pycache__/
+.DS_Store
