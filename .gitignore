@@ -3,3 +3,7 @@ incident_report.json
 reporte_ejecutivo_ia.png
 security_summary_db.png
 security_vault.db
+incident_report.txt
+venv/
+.env
+.streamlit/
