@@ -4,6 +4,26 @@ import datetime
 import os
 import json
 
+import sqlite3 # Agrégala al principio
+
+def init_db():
+    conn = sqlite3.connect('security_vault.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS incidentes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ip_origen TEXT,
+            analisis_ia TEXT,
+            categoria TEXT,
+            nivel_riesgo TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db() # Llama a la función aquí mismo
+
 def save_report(log, report, status):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -15,12 +35,6 @@ def save_report(log, report, status):
         "analisis_ia": report
     }
     
-    # Guardamos en un archivo .json (modo append no es nativo en JSON, así que usamos líneas)
-    with open("incident_report.json", "a") as f:
-        f.write(json.dumps(incident_data) + "\n")
-    
-    print(f"[REPORTE]: Guardado exitosamente en incident_report.json")
-
 # Archivo que funcionará como nuestra "Lista Negra"
 BLACKLIST_FILE = "blacklist.txt"
 
@@ -30,6 +44,15 @@ def simulate_firewall_block(ip, reason):
     with open(BLACKLIST_FILE, "a") as f:
         f.write(f"{ip} | {timestamp} | Razón: {reason}\n")
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
+
+def extraer_categoria(texto):
+    texto = texto.upper()
+    if "SQL" in texto: return "Inyección SQL"
+    if "MALWARE" in texto: return "Malware"
+    if "ACCESO" in texto or "UNAUTHORIZED" in texto: return "Acceso No Autorizado"
+    if "SCAN" in texto or "ESCANEO" in texto: return "Escaneo de Puertos"
+    if "BRUTE FORCE" in texto or "FUERZA BRUTA" in texto: return "Fuerza Bruta"
+    return "Otras Amenazas"    
 
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
@@ -58,28 +81,29 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     # Lógica de Orquestación: Si la IA dice "Bloquear", el sistema actúa
     if "Bloquear" in analysis:
         simulate_firewall_block(client_ip, "Ataque detectado por IA")
-        save_report(log_entry, analysis, "BLOQUEADO")
+    # MODIFICA ESTA LÍNEA (90):
+        save_report(log_entry, analysis, "BLOQUEADO", client_ip) 
     else:
-        save_report(log_entry, analysis, "PERMITIDO")
+    # MODIFICA ESTA LÍNEA (93):
+        save_report(log_entry, analysis, "PERMITIDO", client_ip)
 
     return analysis
 
-def save_report(log, report, status):
-    import json
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    data = {
-        "timestamp": timestamp,
-        "log_original": log,
-        "analisis_ia": report,
-        "estado": status
-    }
-    
-    file_name = "incident_report.json"
-    
-    with open(file_name, "a", encoding='utf-8') as f:
-        f.write(json.dumps(data, ensure_ascii=False) + "\n")
-        f.flush() # Esto obliga al sistema a escribir en el disco inmediatamente
+def save_report(log, report, status, client_ip):
+    # Extraemos la categoría y el riesgo del análisis de la IA
+    # (Usaremos la función extraer_categoria que añadiremos abajo)
+    categoria_detectada = extraer_categoria(report)
+    nivel_riesgo = "ALTO" if "Bloquear" in status else "MEDIO"
+
+    conn = sqlite3.connect('security_vault.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO incidentes (ip_origen, analisis_ia, categoria, nivel_riesgo)
+        VALUES (?, ?, ?, ?)
+    ''', (client_ip, report, categoria_detectada, nivel_riesgo))
+    conn.commit()
+    conn.close()
+    print(f"[DB] Incidente guardado exitosamente en security_vault.db")
 
 def start_listener():
     # Creamos el socket (nuestra antena de red)

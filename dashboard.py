@@ -1,78 +1,66 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import json
+import sqlite3
 import os
 
 def generate_dashboard():
-    file_path = "incident_report.json"
+    db_path = "security_vault.db"
     
-    # 1. Verificar si el archivo existe
-    if not os.path.exists(file_path):
-        print(f"[ERROR]: No se encuentra el archivo {file_path}. ¡Lanza un ataque primero!")
+    # 1. Verificar si la base de datos existe
+    if not os.path.exists(db_path):
+        print(f"[ERROR] No se encuentra la base de datos {db_path}. ¡Lanza un ataque primero!")
         return
 
-    print("[*] Leyendo datos de incidentes...")
-    eventos = []
+    print("[*] Conectando a la Bóveda de Seguridad...")
     
-    with open(file_path, "r") as f:
-        for i, linea in enumerate(f):
-            try:
-                eventos.append(json.loads(linea))
-            except json.JSONDecodeError:
-                print(f"[!] Error al leer la línea {i+1}. Saltando...")
-
-    # 2. Verificar si hay datos cargados
-    if not eventos:
-        print("[!] El archivo está vacío. No hay nada que graficar.")
+    # 2. Leer los datos directamente desde SQL
+    try:
+        conn = sqlite3.connect(db_path)
+        # Traemos todos los incidentes ordenados por fecha
+        df = pd.read_sql_query("SELECT * FROM incidentes ORDER BY fecha DESC", conn)
+        conn.close()
+    except Exception as e:
+        print(f"[ERROR] Fallo al leer la base de datos: {e}")
         return
 
-    print(f"[+] Se cargaron {len(eventos)} eventos correctamente.")
-    df = pd.DataFrame(eventos)
-    
-    # 3. Limpieza de datos (Búsqueda flexible de categorías)
-    def extraer_categoria(texto):
-        texto = texto.upper() # Pasamos todo a mayúsculas para no fallar por tildes o minúsculas
-        if "SQL INJECTION" in texto or "INYECCIÓN SQL" in texto:
-            return "Inyección SQL"
-        elif "MALWARE" in texto:
-            return "Malware"
-        elif "UNAUTHORIZED" in texto or "ACCESO NO AUTORIZADO" in texto:
-            return "Acceso No Autorizado"
-        elif "SCAN" in texto or "ESCANEO" in texto:
-            return "Escaneo de Puertos"
-        elif "BRUTE FORCE" in texto or "FUERZA BRUTA" in texto:
-            return "Fuerza Bruta"
-        else:
-            return "Otras Amenazas"
+    if df.empty:
+        print("[!] La base de datos está vacía. Esperando por incidentes...")
+        return
 
-    # Aplicamos la función a cada análisis de la IA
-    df['categoria_limpia'] = df['analisis_ia'].apply(extraer_categoria)
+    print(f"[+] Se cargaron {len(df)} incidentes correctamente.")
 
-    # 4. Contar los ataques por cada nueva categoría limpia
-    conteo = df['categoria_limpia'].value_counts()
+    # 3. Preparar los datos para la gráfica
+    conteo = df['categoria'].value_counts()
 
-    # --- CREAR LA GRÁFICA ---
+    # 4. Crear la visualización profesional
     plt.figure(figsize=(12, 7))
-    colores = plt.cm.Paired(range(len(conteo)))
-    ax = conteo.plot(kind='bar', color=colores, edgecolor='black')
+    # Paleta de colores profesional
+    colores = ['#ff4d4d', '#3399ff', '#33cc33', '#ffcc00', '#9966ff']
     
+    ax = conteo.plot(kind='bar', color=colores[:len(conteo)], edgecolor='black', linewidth=1.2)
+    
+    # Añadir los números exactos sobre cada barra
     for p in ax.patches:
         ax.annotate(f'{int(p.get_height())}', 
                     (p.get_x() + p.get_width() / 2., p.get_height()), 
                     ha='center', va='center', 
-                    xytext=(0, 9), 
+                    xytext=(0, 10), 
                     textcoords='offset points',
-                    fontsize=11, fontweight='bold')
+                    fontsize=12, fontweight='bold')
 
-    plt.title('Análisis Estadístico de Amenazas: Orquestador IA', fontsize=16, fontweight='bold', pad=20)
-    plt.xlabel('Categoría de Ataque Identificada', fontsize=12, labelpad=10)
+    # Personalización del diseño
+    plt.title('REPORTE DE AMENAZAS DETECTADAS (IA ORCHESTRATOR)', fontsize=16, fontweight='bold', pad=20)
+    plt.xlabel('Tipo de Amenaza Identificada', fontsize=12, labelpad=10)
     plt.ylabel('Número de Intentos Detectados', fontsize=12, labelpad=10)
-    plt.xticks(rotation=20, ha='right', fontsize=10)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.xticks(rotation=15, ha='right')
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # Guardar el reporte para mostrar al cliente
+    report_name = "reporte_ejecutivo_ia.png"
     plt.tight_layout()
-
-    plt.savefig("security_summary.png")
-    print("[SUCCESS]: Gráfica guardada como security_summary.png")
+    plt.savefig(report_name)
+    
+    print(f"[SUCCESS] Dashboard generado: {report_name}")
     plt.show()
 
 if __name__ == "__main__":
