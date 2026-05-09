@@ -45,25 +45,29 @@ def simulate_firewall_block(ip, reason):
         f.write(f"{ip} | {timestamp} | Razón: {reason}\n")
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
 
-def extraer_categoria(texto):
-    texto = texto.upper()
-    if "SQL" in texto: return "Inyección SQL"
-    if "MALWARE" in texto: return "Malware"
-    if "ACCESO" in texto or "UNAUTHORIZED" in texto: return "Acceso No Autorizado"
-    if "SCAN" in texto or "ESCANEO" in texto: return "Escaneo de Puertos"
-    if "BRUTE FORCE" in texto or "FUERZA BRUTA" in texto: return "Fuerza Bruta"
-    return "Otras Amenazas"    
+def extraer_categoria(reporte):
+    import re
+    match = re.search(r"CATEGORÍA:\s*(.*)", reporte)
+    return match.group(1).strip() if match else "Otras Amenazas"
 
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
     prompt = f"""
-    Eres un analista SOC Nivel 3. Analiza este log: '{log_entry}'
-    Responde estrictamente con este formato:
-    CATEGORÍA: [Nombre]
-    NIVEL DE RIESGO: [Bajo/Medio/Alto]
-    ACCIÓN: [Bloquear/Ignorar]
-    RESUMEN: [Una frase]
+    Eres un experto en Ciberseguridad. Analiza: '{log_entry}'
+    
+    DEBES elegir una de estas categorías exactas según el ataque:
+    - SQL Injection
+    - Remote Code Execution
+    - Cross-Site Scripting
+    - Path Traversal
+    - Brute Force
+    - Directory Scanning
+    
+    Responde así:
+    CATEGORÍA: [Nombre de la categoría elegida]
+    NIVEL DE RIESGO: [Crítico/Alto/Medio/Bajo]
+    ...
     """
 
     # Llamada a la IA
@@ -79,12 +83,12 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print("-" * 30)
 
     # Lógica de Orquestación: Si la IA dice "Bloquear", el sistema actúa
-    if "Bloquear" in analysis:
+    if "BLOQUEAR" in analysis.upper():
         simulate_firewall_block(client_ip, "Ataque detectado por IA")
-    # MODIFICA ESTA LÍNEA (90):
+    
         save_report(log_entry, analysis, "BLOQUEADO", client_ip) 
     else:
-    # MODIFICA ESTA LÍNEA (93):
+    
         save_report(log_entry, analysis, "PERMITIDO", client_ip)
 
     return analysis
@@ -93,14 +97,18 @@ def save_report(log, report, status, client_ip):
     # Extraemos la categoría y el riesgo del análisis de la IA
     # (Usaremos la función extraer_categoria que añadiremos abajo)
     categoria_detectada = extraer_categoria(report)
-    nivel_riesgo = "ALTO" if "Bloquear" in status else "MEDIO"
+    import re
+    riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", report)
+    nivel_riesgo = riesgo_match.group(1).upper() if riesgo_match else "DESCONOCIDO"
+    
+    #nivel_riesgo = "ALTO" if "Bloquear" in status else "MEDIO"
 
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO incidentes (ip_origen, analisis_ia, categoria, nivel_riesgo)
-        VALUES (?, ?, ?, ?)
-    ''', (client_ip, report, categoria_detectada, nivel_riesgo))
+        VALUES (?, ?, ?, ?, ?)
+    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), client_ip, categoria_detectada, nivel_riesgo, log))
     conn.commit()
     conn.close()
     print(f"[DB] Incidente guardado exitosamente en security_vault.db")
