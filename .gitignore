@@ -7,3 +7,5 @@ incident_report.txt
 venv/
 .env
 .streamlit/
+__pycache__/
+*.pyc
