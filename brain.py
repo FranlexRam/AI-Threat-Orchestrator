@@ -2,9 +2,14 @@ import socket
 import ollama
 import datetime
 import os
+import re
 import json
+import sqlite3
+import requests
+from dotenv import load_dotenv
 
-import sqlite3 # Agrégala al principio
+# Cargar las variables del archivo .env
+load_dotenv()
 
 def init_db():
     conn = sqlite3.connect('security_vault.db')
@@ -16,7 +21,9 @@ def init_db():
             ip_origen TEXT,
             analisis_ia TEXT,
             categoria TEXT,
-            nivel_riesgo TEXT
+            nivel_riesgo TEXT,
+            estatus TEXT,
+            log_original TEXT
         )
     ''')
     conn.commit()
@@ -24,16 +31,38 @@ def init_db():
 
 init_db() # Llama a la función aquí mismo
 
-def save_report(log, report, status):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#Función de Telegram Alert
+def send_telegram_alert(categoria, riesgo, ip):
+    """Envía una alerta de seguridad estructurada a Telegram"""
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
-    # Creamos una estructura de datos profesional
-    incident_data = {
-        "timestamp": timestamp,
-        "status": status,
-        "log_original": log,
-        "analisis_ia": report
+    mensaje = (
+        f"🚨 *ALERTA DE SEGURIDAD* 🚨\n\n"
+        f"🛡️ *SaktiShield ha detectado un ataque*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 *Categoría:* {categoria}\n"
+        f"⚠️ *Nivel de Riesgo:* {riesgo}\n"
+        f"🌐 *IP Atacante:* {ip}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ _Acción: IP Bloqueada en Firewall._"
+    )
+    
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": mensaje,
+        "parse_mode": "Markdown"
     }
+    
+    try:
+        response = requests.post(url, data=payload)
+        if response.status_code == 200:
+            print(f"[OK]: Alerta enviada a tu iPhone con éxito.")
+        else:
+            print(f"[ERROR]: Telegram respondió con código {response.status_code}")
+    except Exception as e:
+        print(f"[ERROR]: Fallo crítico en el envío de alerta: {e}")
     
 # Archivo que funcionará como nuestra "Lista Negra"
 BLACKLIST_FILE = "blacklist.txt"
@@ -46,7 +75,6 @@ def simulate_firewall_block(ip, reason):
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
 
 def extraer_categoria(reporte):
-    import re
     match = re.search(r"CATEGORÍA:\s*(.*)", reporte)
     return match.group(1).strip() if match else "Otras Amenazas"
 
@@ -72,7 +100,8 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
     # Llamada a la IA
     response = ollama.chat(model='llama3.2:1b', messages=[
-        {'role': 'user', 'content': prompt},
+        {"role": "system", "content": "Eres un experto en ciberseguridad. Analiza el siguiente log y determina si es un ataque. Responde SIEMPRE con este formato exacto:\nDECISIÓN: [BLOQUEAR/PERMITIR]\nNIVEL DE RIESGO: [ALTO/MEDIO/BAJO]\nCATEGORÍA: [Nombre de la categoría]\nMOTIVO: [Breve explicación]"},
+        {"role": "user", "content": log_entry}
     ])
 
     analysis = response['message']['content']
@@ -85,6 +114,9 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     # Lógica de Orquestación: Si la IA dice "Bloquear", el sistema actúa
     if "BLOQUEAR" in analysis.upper():
         simulate_firewall_block(client_ip, "Ataque detectado por IA")
+
+        #Llamando función de Telegram Alert
+        send_telegram_alert("Ataque Web Detectado", "ALTO", client_ip)
     
         save_report(log_entry, analysis, "BLOQUEADO", client_ip) 
     else:
@@ -93,12 +125,18 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
     return analysis
 
-def save_report(log, report, status, client_ip):
+def save_report(log_entry, analysis, status, client_ip):
     # Extraemos la categoría y el riesgo del análisis de la IA
     # (Usaremos la función extraer_categoria que añadiremos abajo)
-    categoria_detectada = extraer_categoria(report)
+
+    # Buscamos "NIVEL DE RIESGO" ignorando mayúsculas y con espacios flexibles
+    match_riesgo = re.search(r"NIVEL DE RIESGO\s*:?\s*(\w+)", analysis, flags=re.IGNORECASE)  
+    # Si lo encuentra, lo pone en mayúsculas. Si no, pone REVISAR.
+    nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "REVISAR"
+
+    categoria_detectada = extraer_categoria(analysis)
     import re
-    riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", report)
+    riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", analysis)
     nivel_riesgo = riesgo_match.group(1).upper() if riesgo_match else "DESCONOCIDO"
     
     #nivel_riesgo = "ALTO" if "Bloquear" in status else "MEDIO"
@@ -106,9 +144,17 @@ def save_report(log, report, status, client_ip):
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO incidentes (ip_origen, analisis_ia, categoria, nivel_riesgo)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), client_ip, categoria_detectada, nivel_riesgo, log))
+            INSERT INTO incidentes (fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
+            client_ip, 
+            analysis, 
+            categoria_detectada, 
+            nivel_riesgo, 
+            status, 
+            log_entry
+        ))
     conn.commit()
     conn.close()
     print(f"[DB] Incidente guardado exitosamente en security_vault.db")
