@@ -1,8 +1,9 @@
+#from datetime import datetime
+import re
 import socket
 import ollama
 import datetime
 import os
-import re
 import json
 import sqlite3
 import requests
@@ -69,7 +70,7 @@ BLACKLIST_FILE = "blacklist.txt"
 
 def simulate_firewall_block(ip, reason):
     """Simula la ejecución de una regla de IPTables o Firewall."""
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(BLACKLIST_FILE, "a") as f:
         f.write(f"{ip} | {timestamp} | Razón: {reason}\n")
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
@@ -91,7 +92,13 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     - Path Traversal
     - Brute Force
     - Directory Scanning
-    
+
+    Si detectas cualquier intento de Inyección SQL, XSS o caracteres sospechosos como ' OR '1'='1, la DECISIÓN DEBE SER SIEMPRE: BLOQUEAR y el RIESGO DEBE SER: CRÍTICO
+    DEBES ser extremadamente estricto. 
+    - Si detectas patrones como ' OR '1'='1 o cualquier intento de bypass, la DECISIÓN debe ser BLOQUEAR.
+    - El NIVEL DE RIESGO para estos ataques debe ser CRÍTICO.
+    - No importa si la petición parece "simple", si es maliciosa, se bloquea.
+
     Responde así:
     CATEGORÍA: [Nombre de la categoría elegida]
     NIVEL DE RIESGO: [Crítico/Alto/Medio/Bajo]
@@ -135,11 +142,11 @@ def save_report(log_entry, analysis, status, client_ip):
     nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "REVISAR"
 
     categoria_detectada = extraer_categoria(analysis)
-    import re
-    riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", analysis)
-    nivel_riesgo = riesgo_match.group(1).upper() if riesgo_match else "DESCONOCIDO"
     
+    riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", analysis)
+    #nivel_riesgo = riesgo_match.group(1).upper() if riesgo_match else "DESCONOCIDO"
     #nivel_riesgo = "ALTO" if "Bloquear" in status else "MEDIO"
+    
 
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
@@ -147,7 +154,7 @@ def save_report(log_entry, analysis, status, client_ip):
             INSERT INTO incidentes (fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
+            datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
             client_ip, 
             analysis, 
             categoria_detectada, 
