@@ -83,15 +83,19 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
     prompt = f"""
-    ERES UN SISTEMA DE SEGURIDAD CRÍTICO (WAF). Analiza el siguiente log y decide si es una amenaza.
-
-    LOG A ANALIZAR:
+    Eres un Analista de Ciberseguridad de Nivel 3. Analiza el siguiente log:
     {log_entry}
 
     REGLAS DE ORO:
-    1. Si detectas patrones de SQL Injection (OR '1'='1', UNION SELECT, etc.) o XSS (etiquetas <script>, alert, event handlers), la DECISIÓN debe ser obligatoriamente: BLOQUEAR.
-    2. El NIVEL DE RIESGO para inyecciones de código siempre es: CRÍTICO.
-    3. No ignores ataques "simples"; cualquier intento de manipulación se considera malicioso.
+    INSTRUCCIONES DE CLASIFICACIÓN:
+    1. CATEGORÍA: Clasifica EXCLUSIVAMENTE como: [SQL INJECTION, XSS, DIRECTORY TRAVERSAL, BRUTE FORCE, DOS, o LEGÍTIMO].
+    2. NIVEL DE RIESGO: Clasifica como: [CRÍTICO, ALTO, MEDIO, o BAJO].
+    3. DECISIÓN: Si el riesgo es ALTO o CRÍTICO, la decisión DEBE ser BLOQUEAR.
+    4. Si detectas patrones de SQL Injection (OR '1'='1', UNION SELECT, etc.) o XSS (etiquetas <script>, alert, event handlers), la DECISIÓN debe ser obligatoriamente: BLOQUEAR.
+    5. No ignores ataques "simples"; cualquier intento de manipulación se considera malicioso.
+    - Si hay ' OR '1'='1 es SQL INJECTION.
+    - Si hay <script> o alert es XSS.
+    - Si es normal es TRÁFICO LEGÍTIMO.
 
     RESPONDE ÚNICAMENTE CON ESTE FORMATO:
     DECISIÓN: [BLOQUEAR o PERMITIR]
@@ -120,6 +124,13 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
         #Llamando función de Telegram Alert
         send_telegram_alert("Ataque Web Detectado", "ALTO", client_ip)
+        # Solo enviar a Telegram si el riesgo es importante
+        #**NUEVO ARREGLO TELEGRAM ALERT:
+        # if send_telegram_alert in ["ALTO", "CRÍTICO"]:
+        #     send_telegram_alert(f"🚨 ALERTA SAKTISHIELD\nTipo: {categoria}\nRiesgo: {send_telegram_alert}\nAcción: {decision}")
+        #     print(f"[OK] Notificación enviada por riesgo {send_telegram_alert}")
+        # else:
+        #     print(f"[INFO] Riesgo {send_telegram_alert}: No se requiere notificación.")
     
         save_report(log_entry, analysis, "BLOQUEADO", client_ip) 
     else:
@@ -130,19 +141,21 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
 def save_report(log_entry, analysis, status, client_ip):
     # Extraemos la categoría y el riesgo del análisis de la IA
-    # (Usaremos la función extraer_categoria que añadiremos abajo)
 
     # Buscamos "NIVEL DE RIESGO" ignorando mayúsculas y con espacios flexibles
     match_riesgo = re.search(r"NIVEL DE RIESGO\s*:?\s*(\w+)", analysis, flags=re.IGNORECASE)  
     # Si lo encuentra, lo pone en mayúsculas. Si no, pone REVISAR.
-    nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "REVISAR"
+    #**Nueva actualización aqui:
+    # Si la IA dice BLOQUEAR, el riesgo es ALTO por defecto, si no, lo extraemos.
+    if "BLOQUEAR" in analysis.upper():
+        nivel_riesgo = "ALTO"
+    else:
+        nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "BAJO"
 
     categoria_detectada = extraer_categoria(analysis)
     
     riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", analysis)
-    #nivel_riesgo = riesgo_match.group(1).upper() if riesgo_match else "DESCONOCIDO"
-    #nivel_riesgo = "ALTO" if "Bloquear" in status else "MEDIO"
-    
+
 
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
