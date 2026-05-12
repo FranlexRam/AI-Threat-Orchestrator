@@ -83,25 +83,21 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
     prompt = f"""
-    Eres un experto en Ciberseguridad. Analiza: '{log_entry}'
-    
-    DEBES elegir una de estas categorías exactas según el ataque:
-    - SQL Injection
-    - Remote Code Execution
-    - Cross-Site Scripting
-    - Path Traversal
-    - Brute Force
-    - Directory Scanning
+    ERES UN SISTEMA DE SEGURIDAD CRÍTICO (WAF). Analiza el siguiente log y decide si es una amenaza.
 
-    Si detectas cualquier intento de Inyección SQL, XSS o caracteres sospechosos como ' OR '1'='1, la DECISIÓN DEBE SER SIEMPRE: BLOQUEAR y el RIESGO DEBE SER: CRÍTICO
-    DEBES ser extremadamente estricto. 
-    - Si detectas patrones como ' OR '1'='1 o cualquier intento de bypass, la DECISIÓN debe ser BLOQUEAR.
-    - El NIVEL DE RIESGO para estos ataques debe ser CRÍTICO.
-    - No importa si la petición parece "simple", si es maliciosa, se bloquea.
+    LOG A ANALIZAR:
+    {log_entry}
 
-    Responde así:
-    CATEGORÍA: [Nombre de la categoría elegida]
-    NIVEL DE RIESGO: [Crítico/Alto/Medio/Bajo]
+    REGLAS DE ORO:
+    1. Si detectas patrones de SQL Injection (OR '1'='1', UNION SELECT, etc.) o XSS (etiquetas <script>, alert, event handlers), la DECISIÓN debe ser obligatoriamente: BLOQUEAR.
+    2. El NIVEL DE RIESGO para inyecciones de código siempre es: CRÍTICO.
+    3. No ignores ataques "simples"; cualquier intento de manipulación se considera malicioso.
+
+    RESPONDE ÚNICAMENTE CON ESTE FORMATO:
+    DECISIÓN: [BLOQUEAR o PERMITIR]
+    NIVEL DE RIESGO: [CRÍTICO, ALTO, MEDIO o BAJO]
+    CATEGORÍA: [Nombre de la vulnerabilidad]
+    MOTIVO: [Breve explicación técnica]
     ...
     """
 
