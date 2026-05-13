@@ -118,39 +118,38 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(analysis)
     print("-" * 30)
 
-    # Lógica de Orquestación: Si la IA dice "Bloquear", el sistema actúa
-    if "BLOQUEAR" in analysis.upper():
-        simulate_firewall_block(client_ip, "Ataque detectado por IA")
+    # 1. Determinamos el nivel de riesgo buscando en el texto de la IA
+    if "CRÍTICO" in analysis.upper(): nivel_riesgo = "CRÍTICO"
+    elif "ALTO" in analysis.upper(): nivel_riesgo = "ALTO"
+    elif "MEDIO" in analysis.upper(): nivel_riesgo = "MEDIO"
+    else: nivel_riesgo = "BAJO"
 
-        #Llamando función de Telegram Alert
-        send_telegram_alert("Ataque Web Detectado", "ALTO", client_ip)
-        # Solo enviar a Telegram si el riesgo es importante
-        #**NUEVO ARREGLO TELEGRAM ALERT:
-        # if send_telegram_alert in ["ALTO", "CRÍTICO"]:
-        #     send_telegram_alert(f"🚨 ALERTA SAKTISHIELD\nTipo: {categoria}\nRiesgo: {send_telegram_alert}\nAcción: {decision}")
-        #     print(f"[OK] Notificación enviada por riesgo {send_telegram_alert}")
-        # else:
-        #     print(f"[INFO] Riesgo {send_telegram_alert}: No se requiere notificación.")
-    
-        save_report(log_entry, analysis, "BLOQUEADO", client_ip) 
+        # 2. Decidimos si bloqueamos
+    if "BLOQUEAR" in analysis.upper():
+            simulate_firewall_block(client_ip, "Ataque detectado por IA")
+            
+            # 3. Filtro de Telegram: Solo si es ALTO o CRÍTICO
+            if nivel_riesgo in ["ALTO", "CRÍTICO"]:
+                send_telegram_alert("⚠️ Ataque Web Detectado", nivel_riesgo, client_ip)
+            
+            save_report(log_entry, analysis, "BLOQUEADO", client_ip, nivel_riesgo)
     else:
-    
-        save_report(log_entry, analysis, "PERMITIDO", client_ip)
+            save_report(log_entry, analysis, "PERMITIDO", client_ip, nivel_riesgo)
 
     return analysis
 
-def save_report(log_entry, analysis, status, client_ip):
+def save_report(log_entry, analysis, status, client_ip, nivel_riesgo):
     # Extraemos la categoría y el riesgo del análisis de la IA
 
     # Buscamos "NIVEL DE RIESGO" ignorando mayúsculas y con espacios flexibles
     match_riesgo = re.search(r"NIVEL DE RIESGO\s*:?\s*(\w+)", analysis, flags=re.IGNORECASE)  
     # Si lo encuentra, lo pone en mayúsculas. Si no, pone REVISAR.
     #**Nueva actualización aqui:
-    # Si la IA dice BLOQUEAR, el riesgo es ALTO por defecto, si no, lo extraemos.
-    if "BLOQUEAR" in analysis.upper():
-        nivel_riesgo = "ALTO"
-    else:
-        nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "BAJO"
+    # # Si la IA dice BLOQUEAR, el riesgo es ALTO por defecto, si no, lo extraemos.
+    # if "BLOQUEAR" in analysis.upper():
+    #     nivel_riesgo = "ALTO"
+    # else:
+    #     nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "BAJO"
 
     categoria_detectada = extraer_categoria(analysis)
     
