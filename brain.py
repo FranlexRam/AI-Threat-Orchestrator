@@ -76,36 +76,61 @@ def simulate_firewall_block(ip, reason):
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
 
 def extraer_categoria(reporte):
-    match = re.search(r"CATEGORÍA:\s*(.*)", reporte)
-    return match.group(1).strip() if match else "Otras Amenazas"
+    # Convertimos a mayúsculas para que la búsqueda no falle por minúsculas
+    reporte_up = reporte.upper()
+    
+    # Búsqueda por palabras clave (Mucho más seguro que Regex rígido)
+    if "SQL INJECTION" in reporte_up:
+        return "SQL Injection"
+    elif "XSS" in reporte_up or "SCRIPT" in reporte_up:
+        return "XSS (Cross-Site Scripting)"
+    elif "DIRECTORY TRAVERSAL" in reporte_up or "PASSWD" in reporte_up:
+        return "Directory Traversal"
+    elif "BRUTE FORCE" in reporte_up:
+        return "Brute Force"
+    elif "DOS" in reporte_up or "DENIAL OF SERVICE" in reporte_up:
+        return "Denial of Service"
+    elif "LEGÍTIMO" in reporte_up or "PERMITIR" in reporte_up:
+        return "Tráfico Legítimo"
+    
+    # Si nada de lo anterior funciona, intentamos el Regex como último recurso
+    match = re.search(r"CATEGORÍA:\s*(.*)", reporte, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+        
+    return "Otras Amenazas"
 
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
     prompt = f"""
-    SISTEMA DE DETECCIÓN DE INTRUSOS. Analiza el siguiente LOG y responde siguiendo REGLAS ESTRICTAS.
-    LOG: {log_entry}
+    [CONTEXTO]
+    Eres un firewall inteligente. Tu objetivo es clasificar logs de servidor.
+    
+    [LOG A ANALIZAR]
+    {log_entry}
 
-    REGLAS DE CLASIFICACIÓN:
-    1. Si el LOG contiene '<script>', 'alert(', o etiquetas HTML: CATEGORÍA: XSS | RIESGO: CRÍTICO | DECISIÓN: BLOQUEAR.
-    2. Si el LOG contiene 'OR 1=1', '--', o 'UNION SELECT': CATEGORÍA: SQL INJECTION | RIESGO: CRÍTICO | DECISIÓN: BLOQUEAR.
-    3. Si el LOG contiene '../', '/etc/passwd' o 'boot.ini': CATEGORÍA: DIRECTORY TRAVERSAL | RIESGO: ALTO | DECISIÓN: BLOQUEAR.
-    4. Si el LOG es una petición normal (ej. /about, /contact, /index): CATEGORÍA: LEGÍTIMO | RIESGO: BAJO | DECISIÓN: PERMITIR.
+    [REGLAS DE SEGURIDAD]
+    - Si detectas '<script>', 'alert' o tags HTML -> Categoría: XSS | Riesgo: CRÍTICO | Decisión: BLOQUEAR.
+    - Si detectas 'OR 1=1', '--' o 'UNION' -> Categoría: SQL INJECTION | Riesgo: CRÍTICO | Decisión: BLOQUEAR.
+    - Si detectas '../' o '/etc/passwd' -> Categoría: DIRECTORY TRAVERSAL | Riesgo: ALTO | Decisión: BLOQUEAR.
+    - Si el log es una petición normal (ej. /index, /about) -> Categoría: LEGÍTIMO | Riesgo: BAJO | Decisión: PERMITIR.
 
-    INSTRUCCIÓN DE LENGUAJE: Responde EXCLUSIVAMENTE en ESPAÑOL TÉCNICO. Prohibido inventar palabras.
-
-    FORMATO DE RESPUESTA (OBLIGATORIO):
-    DECISIÓN: [BLOQUEAR o PERMITIR]
-    NIVEL DE RIESGO: [CRÍTICO, ALTO, MEDIO o BAJO]
-    CATEGORÍA: [Nombre de la categoría]
-    MOTIVO: [Explicación técnica de 10 palabras máximo]
-
+    [FORMATO DE RESPUESTA]
+    Responde estrictamente en este formato:
+    DECISIÓN: [BLOQUEAR/PERMITIR]
+    NIVEL DE RIESGO: [CRÍTICO/ALTO/MEDIO/BAJO]
+    CATEGORÍA: [Nombre]
+    MOTIVO: [Breve explicación técnica]
     """
 
-    # Llamada a la IA usando la variable 'prompt'
+    # Llamada a la IA optimizada
     response = ollama.chat(model='llama3.2:1b', messages=[
-        {"role": "system", "content": "Eres un analista de seguridad estricto. No converses, solo clasifica."},
-        {"role": "user", "content": prompt} # <--- Aquí usamos el prompt con las reglas
+        {
+            "role": "system", 
+            "content": "Eres un Firewall de nueva generación. Tu respuesta debe ser corta. Si el tráfico es normal, DEBES responder 'DECISIÓN: PERMITIR' y 'NIVEL DE RIESGO: BAJO'. No menciones las reglas de bloqueo si el tráfico es seguro."
+        },
+        {"role": "user", "content": prompt}
     ])
 
     # Limpiamos asteriscos y espacios que rompen los 'if'
