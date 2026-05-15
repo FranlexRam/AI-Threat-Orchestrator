@@ -83,78 +83,69 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
     prompt = f"""
-    Eres un Analista de Ciberseguridad de Nivel 3. Analiza el siguiente log:
-    {log_entry}
+    SISTEMA DE DETECCIÓN DE INTRUSOS. Analiza el siguiente LOG y responde siguiendo REGLAS ESTRICTAS.
+    LOG: {log_entry}
 
-    REGLAS DE ORO:
-    INSTRUCCIONES DE CLASIFICACIÓN:
-    1. CATEGORÍA: Clasifica EXCLUSIVAMENTE como: [SQL INJECTION, XSS, DIRECTORY TRAVERSAL, BRUTE FORCE, DOS, o LEGÍTIMO].
-    2. NIVEL DE RIESGO: Clasifica como: [CRÍTICO, ALTO, MEDIO, o BAJO].
-    3. DECISIÓN: Si el riesgo es ALTO o CRÍTICO, la decisión DEBE ser BLOQUEAR.
-    4. Si detectas patrones de SQL Injection (OR '1'='1', UNION SELECT, etc.) o XSS (etiquetas <script>, alert, event handlers), la DECISIÓN debe ser obligatoriamente: BLOQUEAR.
-    5. No ignores ataques "simples"; cualquier intento de manipulación se considera malicioso.
-    - Si hay ' OR '1'='1 es SQL INJECTION.
-    - Si hay <script> o alert es XSS.
-    - Si es normal es TRÁFICO LEGÍTIMO.
+    REGLAS DE CLASIFICACIÓN:
+    1. Si el LOG contiene '<script>', 'alert(', o etiquetas HTML: CATEGORÍA: XSS | RIESGO: CRÍTICO | DECISIÓN: BLOQUEAR.
+    2. Si el LOG contiene 'OR 1=1', '--', o 'UNION SELECT': CATEGORÍA: SQL INJECTION | RIESGO: CRÍTICO | DECISIÓN: BLOQUEAR.
+    3. Si el LOG contiene '../', '/etc/passwd' o 'boot.ini': CATEGORÍA: DIRECTORY TRAVERSAL | RIESGO: ALTO | DECISIÓN: BLOQUEAR.
+    4. Si el LOG es una petición normal (ej. /about, /contact, /index): CATEGORÍA: LEGÍTIMO | RIESGO: BAJO | DECISIÓN: PERMITIR.
 
-    RESPONDE ÚNICAMENTE CON ESTE FORMATO:
+    INSTRUCCIÓN DE LENGUAJE: Responde EXCLUSIVAMENTE en ESPAÑOL TÉCNICO. Prohibido inventar palabras.
+
+    FORMATO DE RESPUESTA (OBLIGATORIO):
     DECISIÓN: [BLOQUEAR o PERMITIR]
     NIVEL DE RIESGO: [CRÍTICO, ALTO, MEDIO o BAJO]
-    CATEGORÍA: [Nombre de la vulnerabilidad]
-    MOTIVO: [Breve explicación técnica]
-    ...
+    CATEGORÍA: [Nombre de la categoría]
+    MOTIVO: [Explicación técnica de 10 palabras máximo]
+
     """
 
-    # Llamada a la IA
+    # Llamada a la IA usando la variable 'prompt'
     response = ollama.chat(model='llama3.2:1b', messages=[
-        {"role": "system", "content": "Eres un experto en ciberseguridad. Analiza el siguiente log y determina si es un ataque. Responde SIEMPRE con este formato exacto:\nDECISIÓN: [BLOQUEAR/PERMITIR]\nNIVEL DE RIESGO: [ALTO/MEDIO/BAJO]\nCATEGORÍA: [Nombre de la categoría]\nMOTIVO: [Breve explicación]"},
-        {"role": "user", "content": log_entry}
+        {"role": "system", "content": "Eres un analista de seguridad estricto. No converses, solo clasifica."},
+        {"role": "user", "content": prompt} # <--- Aquí usamos el prompt con las reglas
     ])
 
-    analysis = response['message']['content']
+    # Limpiamos asteriscos y espacios que rompen los 'if'
+    analysis = response['message']['content'].replace("*", "").strip()
     
     # Imprimimos el análisis en consola para que lo veas
     print("-" * 30)
     print(analysis)
     print("-" * 30)
 
-    # 1. Determinamos el nivel de riesgo buscando en el texto de la IA
-    if "CRÍTICO" in analysis.upper(): nivel_riesgo = "CRÍTICO"
-    elif "ALTO" in analysis.upper(): nivel_riesgo = "ALTO"
-    elif "MEDIO" in analysis.upper(): nivel_riesgo = "MEDIO"
+    # Convertimos a mayúsculas una sola vez para comparar fácil
+    analysis_upper = analysis.upper()
+
+    # 1. Determinamos el nivel de riesgo
+    if "CRÍTICO" in analysis_upper: nivel_riesgo = "CRÍTICO"
+    elif "ALTO" in analysis_upper: nivel_riesgo = "ALTO"
+    elif "MEDIO" in analysis_upper: nivel_riesgo = "MEDIO"
     else: nivel_riesgo = "BAJO"
 
-        # 2. Decidimos si bloqueamos
-    if "BLOQUEAR" in analysis.upper():
-            simulate_firewall_block(client_ip, "Ataque detectado por IA")
-            
-            # 3. Filtro de Telegram: Solo si es ALTO o CRÍTICO
-            if nivel_riesgo in ["ALTO", "CRÍTICO"]:
-                send_telegram_alert("⚠️ Ataque Web Detectado", nivel_riesgo, client_ip)
-            
-            save_report(log_entry, analysis, "BLOQUEADO", client_ip, nivel_riesgo)
+    # 2. Decidimos si bloqueamos buscando la palabra exacta
+    if "BLOQUEAR" in analysis_upper:
+        status = "BLOQUEADO"
+        simulate_firewall_block(client_ip, "Ataque detectado por IA")
+        
+        # 3. Filtro estricto de Telegram
+        if nivel_riesgo in ["ALTO", "CRÍTICO"]:
+            # Usamos extraer_categoria para que el mensaje de Telegram sea bonito
+            cat = extraer_categoria(analysis)
+            send_telegram_alert(cat, nivel_riesgo, client_ip)
     else:
-            save_report(log_entry, analysis, "PERMITIDO", client_ip, nivel_riesgo)
+        status = "PERMITIDO"
 
-    return analysis
+    # 4. Guardamos todo pasando el nivel_riesgo que ya calculamos
+    save_report(log_entry, analysis, status, client_ip, nivel_riesgo)
+
+    return f"{status} - {nivel_riesgo}"
 
 def save_report(log_entry, analysis, status, client_ip, nivel_riesgo):
-    # Extraemos la categoría y el riesgo del análisis de la IA
-
-    # Buscamos "NIVEL DE RIESGO" ignorando mayúsculas y con espacios flexibles
-    match_riesgo = re.search(r"NIVEL DE RIESGO\s*:?\s*(\w+)", analysis, flags=re.IGNORECASE)  
-    # Si lo encuentra, lo pone en mayúsculas. Si no, pone REVISAR.
-    #**Nueva actualización aqui:
-    # # Si la IA dice BLOQUEAR, el riesgo es ALTO por defecto, si no, lo extraemos.
-    # if "BLOQUEAR" in analysis.upper():
-    #     nivel_riesgo = "ALTO"
-    # else:
-    #     nivel_riesgo = match_riesgo.group(1).upper() if match_riesgo else "BAJO"
-
+    # La categoría la seguimos extrayendo del texto
     categoria_detectada = extraer_categoria(analysis)
-    
-    riesgo_match = re.search(r"NIVEL DE RIESGO:\s*(\w+)", analysis)
-
 
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
@@ -172,7 +163,7 @@ def save_report(log_entry, analysis, status, client_ip, nivel_riesgo):
         ))
     conn.commit()
     conn.close()
-    print(f"[DB] Incidente guardado exitosamente en security_vault.db")
+    print(f"[DB] Incidente guardado como {status} ({nivel_riesgo})")
 
 def start_listener():
     # Creamos el socket (nuestra antena de red)
