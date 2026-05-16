@@ -100,78 +100,77 @@ def extraer_categoria(reporte):
         
     return "Otras Amenazas"
 
+import urllib.parse  # Asegúrate de tener esta importación al inicio del archivo si no está
+
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
-    prompt = f"""
-    Analiza el siguiente LOG de servidor y clasifícalo según el riesgo.
+    # 1. NORMALIZACIÓN: Decodificamos caracteres URL (%3C -> <) y pasamos todo a mayúsculas
+    log_decoded = urllib.parse.unquote(log_entry)
+    log_upper = log_decoded.upper()
     
-    LOG: {log_entry}
-
-    REGLAS:
-    - Si contiene '<script>', 'alert(' o HTML -> categoria: "XSS", riesgo: "CRÍTICO", decision: "BLOQUEAR"
-    - Si contiene 'OR 1=1', '--' o 'UNION' -> categoria: "SQL Injection", riesgo: "CRÍTICO", decision: "BLOQUEAR"
-    - Si contiene '../' o '/etc/passwd' -> categoria: "Directory Traversal", riesgo: "ALTO", decision: "BLOQUEAR"
-    - Si es una petición normal -> categoria: "Tráfico Legítimo", riesgo: "BAJO", decision: "PERMITIR"
-
-    DEBES responder EXCLUSIVAMENTE con un objeto JSON válido, sin texto adicional, sin introducciones y sin asteriscos.
+    es_ataque = True
     
-    FORMATO DE RESPUESTA JSON: {{
-        "decision": "BLOQUEAR_O_PERMITIR",
-        "riesgo": "NIVEL_DE_RIESGO",
-        "categoria": "NOMBRE_CATEGORIA",
-        "motivo": "EXPLICACION_CORTA"
-    }}
-    """
-
-    # Llamada a la IA con rol estricto
-    response = ollama.chat(model='llama3.2:1b', messages=[
-        {"role": "system", "content": "Eres un firewall que solo responde en formato JSON estricto. No hables, no saludes, solo entrega el objeto JSON."},
-        {"role": "user", "content": prompt}
-    ])
-
-    # Limpieza inicial del texto recibido
-    raw_content = response['message']['content'].strip()
-    
-    print("-" * 30)
-    print(f"Respuesta cruda de la IA:\n{raw_content}")
-    print("-" * 30)
-
-    # Valores por defecto en caso de que falle el JSON parse
-    decision = "PERMITIR"
-    nivel_riesgo = "BAJO"
-    categoria_detectada = "Otras Amenazas"
-    analysis_text = raw_content
-
-    # Intentamos cargar la respuesta como JSON
-    try:
-        # Buscamos el bloque JSON por si la IA metió texto extra por error
-        json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(0))
-            decision = data.get("decision", "PERMITIR").upper()
-            nivel_riesgo = data.get("riesgo", "BAJO").upper()
-            categoria_detectada = data.get("categoria", "Otras Amenazas")
-            analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Motivo: {data.get('motivo', '')}"
-    except Exception as e:
-        print(f"[⚠️ ERROR PARSING JSON]: Falló el formato de la IA, usando fallback manual. Detalle: {e}")
-        # Fallback por si acaso falla el JSON
-        if "BLOQUEAR" in raw_content.upper(): decision = "BLOQUEAR"
-        if "CRÍTICO" in raw_content.upper(): nivel_riesgo = "CRÍTICO"
-        elif "ALTO" in raw_content.upper(): nivel_riesgo = "ALTO"
-
-    # 2. Ejecución de la lógica basada en el JSON limpio
-    if "BLOQUEAR" in decision:
-        status = "BLOQUEADO"
-        simulate_firewall_block(client_ip, f"Ataque detectado: {categoria_detectada}")
+    # 2. MOTOR DE FIRMAS MEJORADO CON REGEX (Indestructible a variaciones de formato)
+    # Detecta <script, script>, alert(, onload=, onerror=, o cualquier etiqueta HTML básica
+    if re.search(r"<SCRIPT|SCRIPT>|ALERT\(|ONLOAD=|ONERROR=|<[A-Z]+>", log_upper):
+        categoria_detectada = "XSS (Cross-Site Scripting)"
+        nivel_riesgo = "CRÍTICO"
+        decision = "BLOQUEAR"
         
-        # Filtro estricto de Telegram
+    elif any(k in log_upper for k in ["OR 1=1", "UNION SELECT", "SELECT ", "--"]):
+        categoria_detectada = "SQL Injection"
+        nivel_riesgo = "CRÍTICO"
+        decision = "BLOQUEAR"
+        
+    elif any(k in log_upper for k in ["../", "/ETC/PASSWD", "BOOT.INI"]):
+        categoria_detectada = "Directory Traversal"
+        nivel_riesgo = "ALTO"
+        decision = "BLOQUEAR"
+        
+    else:
+        # Si está completamente limpio, pasa directo sin tocar la IA
+        es_ataque = False
+        categoria_detectada = "Tráfico Legítimo"
+        nivel_riesgo = "BAJO"
+        decision = "PERMITIR"
+
+    # 3. GENERACIÓN DE REPORTES SOC EXTENSOS CON LA IA
+    if es_ataque:
+        # Usamos texto plano para que el modelo de 1B redacte sin la presión de un formato JSON
+        prompt = f"""
+        Actúa como un analista de ciberseguridad SOC Nivel 3. Redacta un reporte técnico extenso, profundo y muy detallado sobre el siguiente vector de ataque detectado por SaktiShield.
+        Explica el impacto potencial que tendría este payload en el servidor si no fuera bloqueado y por qué es una amenaza severa.
+        
+        LOG COMPROMETIDO: {log_decoded}
+        CATEGORÍA DETECTADA: {categoria_detectada}
+        """
+        try:
+            response = ollama.generate(
+                model='llama3.2:1b',
+                prompt=prompt,
+                options={"temperature": 0.6}  # Flujo técnico natural y extenso
+            )
+            motivo_ia = response['response'].strip().replace("'", '"')
+        except Exception as e:
+            motivo_ia = f"Análisis automatizado: Detección de firma coincidente con {categoria_detectada}."
+    else:
+        motivo_ia = "Solicitud web rutinaria y segura analizada por el núcleo analítico de SaktiShield. No se encontraron anomalías estructurales ni firmas de inyección de código. Tráfico aprobado."
+
+    # Formateamos el bloque de análisis para la Base de Datos y el Dashboard
+    analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Motivo: {motivo_ia}"
+
+    # 4. APLICACIÓN DE POLÍTICAS EN EL FIREWALL
+    if decision == "BLOQUEAR":
+        status = "BLOQUEADO"
+        simulate_firewall_block(client_ip, f"Firma detectada: {categoria_detectada}")
+        
         if nivel_riesgo in ["ALTO", "CRÍTICO"]:
             send_telegram_alert(categoria_detectada, nivel_riesgo, client_ip)
     else:
         status = "PERMITIDO"
 
-    # 4. Guardamos todo pasando los datos limpios directamente
+    # 5. Guardado en la base de datos
     save_report_v2(log_entry, analysis_text, status, client_ip, nivel_riesgo, categoria_detectada)
 
     return f"{status} - {nivel_riesgo} ({categoria_detectada})"
