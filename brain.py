@@ -104,74 +104,79 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
     prompt = f"""
-    [CONTEXTO]
-    Eres un firewall inteligente. Tu objetivo es clasificar logs de servidor.
+    Analiza el siguiente LOG de servidor y clasifícalo según el riesgo.
     
-    [LOG A ANALIZAR]
-    {log_entry}
+    LOG: {log_entry}
 
-    [REGLAS DE SEGURIDAD]
-    - Si detectas '<script>', 'alert' o tags HTML -> Categoría: XSS | Riesgo: CRÍTICO | Decisión: BLOQUEAR.
-    - Si detectas 'OR 1=1', '--' o 'UNION' -> Categoría: SQL INJECTION | Riesgo: CRÍTICO | Decisión: BLOQUEAR.
-    - Si detectas '../' o '/etc/passwd' -> Categoría: DIRECTORY TRAVERSAL | Riesgo: ALTO | Decisión: BLOQUEAR.
-    - Si el log es una petición normal (ej. /index, /about) -> Categoría: LEGÍTIMO | Riesgo: BAJO | Decisión: PERMITIR.
+    REGLAS:
+    - Si contiene '<script>', 'alert(' o HTML -> categoria: "XSS", riesgo: "CRÍTICO", decision: "BLOQUEAR"
+    - Si contiene 'OR 1=1', '--' o 'UNION' -> categoria: "SQL Injection", riesgo: "CRÍTICO", decision: "BLOQUEAR"
+    - Si contiene '../' o '/etc/passwd' -> categoria: "Directory Traversal", riesgo: "ALTO", decision: "BLOQUEAR"
+    - Si es una petición normal -> categoria: "Tráfico Legítimo", riesgo: "BAJO", decision: "PERMITIR"
 
-    [FORMATO DE RESPUESTA]
-    Responde estrictamente en este formato:
-    DECISIÓN: [BLOQUEAR/PERMITIR]
-    NIVEL DE RIESGO: [CRÍTICO/ALTO/MEDIO/BAJO]
-    CATEGORÍA: [Nombre]
-    MOTIVO: [Breve explicación técnica]
+    DEBES responder EXCLUSIVAMENTE con un objeto JSON válido, sin texto adicional, sin introducciones y sin asteriscos.
+    
+    FORMATO DE RESPUESTA JSON: {{
+        "decision": "BLOQUEAR_O_PERMITIR",
+        "riesgo": "NIVEL_DE_RIESGO",
+        "categoria": "NOMBRE_CATEGORIA",
+        "motivo": "EXPLICACION_CORTA"
+    }}
     """
 
-    # Llamada a la IA optimizada
+    # Llamada a la IA con rol estricto
     response = ollama.chat(model='llama3.2:1b', messages=[
-        {
-            "role": "system", 
-            "content": "Eres un Firewall de nueva generación. Tu respuesta debe ser corta. Si el tráfico es normal, DEBES responder 'DECISIÓN: PERMITIR' y 'NIVEL DE RIESGO: BAJO'. No menciones las reglas de bloqueo si el tráfico es seguro."
-        },
+        {"role": "system", "content": "Eres un firewall que solo responde en formato JSON estricto. No hables, no saludes, solo entrega el objeto JSON."},
         {"role": "user", "content": prompt}
     ])
 
-    # Limpiamos asteriscos y espacios que rompen los 'if'
-    analysis = response['message']['content'].replace("*", "").strip()
+    # Limpieza inicial del texto recibido
+    raw_content = response['message']['content'].strip()
     
-    # Imprimimos el análisis en consola para que lo veas
     print("-" * 30)
-    print(analysis)
+    print(f"Respuesta cruda de la IA:\n{raw_content}")
     print("-" * 30)
 
-    # Convertimos a mayúsculas una sola vez para comparar fácil
-    analysis_upper = analysis.upper()
+    # Valores por defecto en caso de que falle el JSON parse
+    decision = "PERMITIR"
+    nivel_riesgo = "BAJO"
+    categoria_detectada = "Otras Amenazas"
+    analysis_text = raw_content
 
-    # 1. Determinamos el nivel de riesgo
-    if "CRÍTICO" in analysis_upper: nivel_riesgo = "CRÍTICO"
-    elif "ALTO" in analysis_upper: nivel_riesgo = "ALTO"
-    elif "MEDIO" in analysis_upper: nivel_riesgo = "MEDIO"
-    else: nivel_riesgo = "BAJO"
+    # Intentamos cargar la respuesta como JSON
+    try:
+        # Buscamos el bloque JSON por si la IA metió texto extra por error
+        json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group(0))
+            decision = data.get("decision", "PERMITIR").upper()
+            nivel_riesgo = data.get("riesgo", "BAJO").upper()
+            categoria_detectada = data.get("categoria", "Otras Amenazas")
+            analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Motivo: {data.get('motivo', '')}"
+    except Exception as e:
+        print(f"[⚠️ ERROR PARSING JSON]: Falló el formato de la IA, usando fallback manual. Detalle: {e}")
+        # Fallback por si acaso falla el JSON
+        if "BLOQUEAR" in raw_content.upper(): decision = "BLOQUEAR"
+        if "CRÍTICO" in raw_content.upper(): nivel_riesgo = "CRÍTICO"
+        elif "ALTO" in raw_content.upper(): nivel_riesgo = "ALTO"
 
-    # 2. Decidimos si bloqueamos buscando la palabra exacta
-    if "BLOQUEAR" in analysis_upper:
+    # 2. Ejecución de la lógica basada en el JSON limpio
+    if "BLOQUEAR" in decision:
         status = "BLOQUEADO"
-        simulate_firewall_block(client_ip, "Ataque detectado por IA")
+        simulate_firewall_block(client_ip, f"Ataque detectado: {categoria_detectada}")
         
-        # 3. Filtro estricto de Telegram
+        # Filtro estricto de Telegram
         if nivel_riesgo in ["ALTO", "CRÍTICO"]:
-            # Usamos extraer_categoria para que el mensaje de Telegram sea bonito
-            cat = extraer_categoria(analysis)
-            send_telegram_alert(cat, nivel_riesgo, client_ip)
+            send_telegram_alert(categoria_detectada, nivel_riesgo, client_ip)
     else:
         status = "PERMITIDO"
 
-    # 4. Guardamos todo pasando el nivel_riesgo que ya calculamos
-    save_report(log_entry, analysis, status, client_ip, nivel_riesgo)
+    # 4. Guardamos todo pasando los datos limpios directamente
+    save_report_v2(log_entry, analysis_text, status, client_ip, nivel_riesgo, categoria_detectada)
 
-    return f"{status} - {nivel_riesgo}"
+    return f"{status} - {nivel_riesgo} ({categoria_detectada})"
 
-def save_report(log_entry, analysis, status, client_ip, nivel_riesgo):
-    # La categoría la seguimos extrayendo del texto
-    categoria_detectada = extraer_categoria(analysis)
-
+def save_report_v2(log_entry, analysis, status, client_ip, nivel_riesgo, categoria):
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
     cursor.execute('''
@@ -181,14 +186,14 @@ def save_report(log_entry, analysis, status, client_ip, nivel_riesgo):
             datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
             client_ip, 
             analysis, 
-            categoria_detectada, 
+            categoria, 
             nivel_riesgo, 
             status, 
             log_entry
         ))
     conn.commit()
     conn.close()
-    print(f"[DB] Incidente guardado como {status} ({nivel_riesgo})")
+    print(f"[DB] Incidente guardado como {status} ({nivel_riesgo}) -> Categoría: {categoria}")
 
 def start_listener():
     # Creamos el socket (nuestra antena de red)
