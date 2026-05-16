@@ -118,7 +118,9 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
         
-    elif any(k in log_upper for k in ["OR 1=1", "UNION SELECT", "SELECT ", "--"]):
+    elif re.search(r"UNION\(?(\/\*.*\*\/|\s)+SELECT", log_upper) or \
+         re.search(r"OR(\/\*.*\*\/|\s)+\d+=\d+", log_upper) or \
+         any(k in log_upper for k in ["SELECT ", "--"]):
         categoria_detectada = "SQL Injection"
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
