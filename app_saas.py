@@ -62,6 +62,8 @@ try:
         "SQL Injection": "#FF003C",
         "XSS (Cross-Site Scripting)": "#FF5722",
         "Directory Traversal": "#FFB300",
+        "Remote Code Execution (RCE)": "#9C27B0",
+        "SSRF Attack": "#00BCD4",
         "Otras Amenazas": "#7C4DFF"
     }
 

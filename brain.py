@@ -105,19 +105,22 @@ import urllib.parse  # Asegúrate de tener esta importación al inicio del archi
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
-    # 1. NORMALIZACIÓN: Decodificamos caracteres URL (%3C -> <) y pasamos todo a mayúsculas
-    log_decoded = urllib.parse.unquote(log_entry)
+    # 1. NORMALIZACIÓN AVANZADA: Decodificamos caracteres URL y forzamos el reemplazo de '+' por espacios reales
+    log_decoded = urllib.parse.unquote(log_entry).replace('+', ' ')
     log_upper = log_decoded.upper()
     
     es_ataque = True
     
     # 2. MOTOR DE FIRMAS MEJORADO CON REGEX (Indestructible a variaciones de formato)
     # Detecta <script, script>, alert(, onload=, onerror=, o cualquier etiqueta HTML básica
+    
+    # Vector 1: XSS
     if re.search(r"<SCRIPT|SCRIPT>|ALERT\(|ONLOAD=|ONERROR=|<[A-Z]+>", log_upper):
         categoria_detectada = "XSS (Cross-Site Scripting)"
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
-        
+
+    # Vector 2: SQL Injection    
     elif re.search(r"UNION\(?(\/\*.*\*\/|\s)+SELECT", log_upper) or \
          re.search(r"OR(\/\*.*\*\/|\s)+\d+=\d+", log_upper) or \
          any(k in log_upper for k in ["SELECT ", "--"]):
@@ -125,10 +128,26 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
         
-    elif any(k in log_upper for k in ["../", "/ETC/PASSWD", "BOOT.INI"]):
+    # Vector 3: Directory Traversal (Mejorado con Regex para variaciones de barras)
+    elif re.search(r"\.\.\/|\.\.\\|/ETC/PASSWD|BOOT\.INI|WIN\.INI", log_upper):
         categoria_detectada = "Directory Traversal"
         nivel_riesgo = "ALTO"
         decision = "BLOQUEAR"
+
+    # Vector 4: Remote Code Execution (RCE)
+    # Detecta de forma estricta metacaracteres de encadenamiento (; , &&, ||, |) seguidos de comandos del sistema
+    elif re.search(r"(;|&&|\|\||\|)[\s\+]*_*(WHOAMI|CAT\s+|ID|UNAME|DIR|IPCONFIG|WGET|CURL)", log_upper):
+        categoria_detectada = "Remote Code Execution (RCE)"
+        nivel_riesgo = "CRÍTICO"
+        decision = "BLOQUEAR"
+
+    # Vector 5: SSRF (Server-Side Request Forgery)
+    # Detecta cuando intentan forzar al servidor a mirar a su propia red local o metadatos de nube
+    elif re.search(r"(LOCALHOST|127\.0\.0\.1|169\.254\.169\.254)", log_upper) and \
+         any(k in log_upper for k in ["URL=", "URI=", "PATH=", "DEST=", "REDIRECT="]):
+        categoria_detectada = "SSRF Attack"
+        nivel_riesgo = "ALTO"
+        decision = "BLOQUEAR"    
         
     else:
         # Si está completamente limpio, pasa directo sin tocar la IA
@@ -139,23 +158,38 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
     # 3. GENERACIÓN DE REPORTES SOC EXTENSOS CON LA IA
     if es_ataque:
-        # Usamos texto plano para que el modelo de 1B redacte sin la presión de un formato JSON
-        prompt = f"""
-        Actúa como un analista de ciberseguridad SOC Nivel 3. Redacta un reporte técnico extenso, profundo y muy detallado sobre el siguiente vector de ataque detectado por SaktiShield.
-        Explica el impacto potencial que tendría este payload en el servidor si no fuera bloqueado y por qué es una amenaza severa.
+        # Extraemos la hora exacta del sistema para dársela digerida a la IA
+        tiempo_actual = datetime.datetime.now().strftime('%Y-%m-%d a las %H:%M:%S')
         
-        LOG COMPROMETIDO: {log_decoded}
-        CATEGORÍA DETECTADA: {categoria_detectada}
+        prompt = f"""
+        Actúa como un Ingeniero de Ciberseguridad en un SOC Nivel 3. Redacta un reporte forense técnico detallado sobre la amenaza interceptada por SaktiShield.
+        
+        DETALLES DEL INCIDENTE:
+        - Hora de Bloqueo: {tiempo_actual}
+        - IP Origen: {client_ip}
+        - Vector: {categoria_detectada}
+        - Payload: {log_decoded}
+
+        REQUERIMIENTOS DEL INFORME (Desgrosa estos 3 puntos con lenguaje técnico severo):
+        1. ANÁLISIS DE SINTAXIS: Explica qué patrones específicos, comandos o caracteres maliciosos (como combinaciones de puntos, barras, variables o signos) dentro del "Payload" activaron la firma.
+        2. IMPACTO TÉCNICO: Detalla el peligro real que correría el servidor si este vector no hubiera sido bloqueado de forma inmediata.
+        3. CONCLUSIÓN: Estado de la IP y mitigación.
+
+        IMPORTANTE: No dejes campos vacíos ni uses corchetes "[ ]". Redacta el análisis técnico completo de forma directa.
         """
         try:
             response = ollama.generate(
                 model='llama3.2:1b',
                 prompt=prompt,
-                options={"temperature": 0.6}  # Flujo técnico natural y extenso
+                options={
+                    "temperature": 0.3,   # Reducimos la creatividad para forzar respuestas factuales y técnicas
+                    "top_p": 0.9,
+                    "num_predict": 512
+                }
             )
             motivo_ia = response['response'].strip().replace("'", '"')
         except Exception as e:
-            motivo_ia = f"Análisis automatizado: Detección de firma coincidente con {categoria_detectada}."
+            motivo_ia = f"Análisis automatizado de emergencia: Detección de firma coincidente con {categoria_detectada} en los filtros deterministas."
     else:
         motivo_ia = "Solicitud web rutinaria y segura analizada por el núcleo analítico de SaktiShield. No se encontraron anomalías estructurales ni firmas de inyección de código. Tráfico aprobado."
 
