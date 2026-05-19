@@ -158,43 +158,50 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
     # 3. GENERACIÓN DE REPORTES SOC EXTENSOS CON LA IA
     if es_ataque:
-        # Extraemos la hora exacta del sistema para dársela digerida a la IA
         tiempo_actual = datetime.datetime.now().strftime('%Y-%m-%d a las %H:%M:%S')
         
-        prompt = f"""
-        Actúa como un Ingeniero de Ciberseguridad en un SOC Nivel 3. Redacta un reporte forense técnico detallado sobre la amenaza interceptada por SaktiShield.
-        
-        DETALLES DEL INCIDENTE:
-        - Hora de Bloqueo: {tiempo_actual}
-        - IP Origen: {client_ip}
-        - Vector: {categoria_detectada}
-        - Payload: {log_decoded}
-
-        REQUERIMIENTOS DEL INFORME (Desgrosa estos 3 puntos con lenguaje técnico severo):
-        1. ANÁLISIS DE SINTAXIS: Explica qué patrones específicos, comandos o caracteres maliciosos (como combinaciones de puntos, barras, variables o signos) dentro del "Payload" activaron la firma.
-        2. IMPACTO TÉCNICO: Detalla el peligro real que correría el servidor si este vector no hubiera sido bloqueado de forma inmediata.
-        3. CONCLUSIÓN: Estado de la IP y mitigación.
-
-        IMPORTANTE: No dejes campos vacíos ni uses corchetes "[ ]". Redacta el análisis técnico completo de forma directa.
-        """
         try:
-            response = ollama.generate(
+            # Usamos ollama.chat para separar de forma estricta el rol del sistema y el evento
+            response = ollama.chat(
                 model='llama3.2:1b',
-                prompt=prompt,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Eres un Ingeniero Forense de Ciberseguridad Nivel 3. Tu tarea es redactar un "
+                            "único párrafo extenso, continuo y altamente técnico que explique el incidente. "
+                            "Debes detallar con lenguaje severo qué comandos o caracteres del payload son peligrosos, "
+                            "cuál es el peligro real para el servidor si no se bloquea y cómo mitiga SaktiShield. "
+                            "IMPORTANTE: No uses viñetas, no dejes campos vacíos, no repitas los datos del evento, "
+                            "ve directo al análisis pericial profundo."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Fecha: {tiempo_actual}\n"
+                            f"Vector: {categoria_detectada}\n"
+                            f"Riesgo: {nivel_riesgo}\n"
+                            f"Payload a analizar: {log_decoded}"
+                        )
+                    }
+                ],
                 options={
-                    "temperature": 0.3,   # Reducimos la creatividad para forzar respuestas factuales y técnicas
-                    "top_p": 0.9,
-                    "num_predict": 512
+                    "temperature": 0.4,      # Mantiene al modelo enfocado y técnico
+                    "top_p": 0.85,
+                    "num_predict": 450       # Espacio suficiente para un párrafo robusto sin cortarse
                 }
             )
-            motivo_ia = response['response'].strip().replace("'", '"')
+            
+            motivo_ia = response['message']['content'].strip().replace("'", '"')
+            
         except Exception as e:
-            motivo_ia = f"Análisis automatizado de emergencia: Detección de firma coincidente con {categoria_detectada} en los filtros deterministas."
+            motivo_ia = f"Análisis automatizado de emergencia: Detección de firma coincidente con {categoria_detectada} en los filtros de SaktiShield."
     else:
         motivo_ia = "Solicitud web rutinaria y segura analizada por el núcleo analítico de SaktiShield. No se encontraron anomalías estructurales ni firmas de inyección de código. Tráfico aprobado."
 
-    # Formateamos el bloque de análisis para la Base de Datos y el Dashboard
-    analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Motivo: {motivo_ia}"
+    # Formateamos el bloque de análisis limpio eliminando duplicados mecánicos
+    analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Análisis Forense: {motivo_ia}"
 
     # 4. APLICACIÓN DE POLÍTICAS EN EL FIREWALL
     if decision == "BLOQUEAR":
