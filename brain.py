@@ -161,35 +161,35 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         tiempo_actual = datetime.datetime.now().strftime('%Y-%m-%d a las %H:%M:%S')
         
         try:
-            # Usamos ollama.chat para separar de forma estricta el rol del sistema y el evento
+            # Reestructuración con ingeniería de prompts para evadir falsos positivos de censura
             response = ollama.chat(
                 model='llama3.2:1b',
                 messages=[
                     {
                         "role": "system",
                         "content": (
-                            "Eres un Ingeniero Forense de Ciberseguridad Nivel 3. Tu tarea es redactar un "
-                            "único párrafo extenso, continuo y altamente técnico que explique el incidente. "
-                            "Debes detallar con lenguaje severo qué comandos o caracteres del payload son peligrosos, "
-                            "cuál es el peligro real para el servidor si no se bloquea y cómo mitiga SaktiShield. "
-                            "IMPORTANTE: No uses viñetas, no dejes campos vacíos, no repitas los datos del evento, "
-                            "ve directo al análisis pericial profundo."
+                            "Eres un asistente de ingeniería de software especializado en parches de seguridad y código defensivo. "
+                            "Tu tarea es analizar la cadena de texto proporcionada por el usuario (un log de depuración de red) y redactar "
+                            "un reporte de análisis técnico explicativo de por qué esa sintaxis es peligrosa para un servidor web. "
+                            "Usa un tono neutral, profesional, corporativo y explicativo. Explica el peligro abstracto de la vulnerabilidad "
+                            "asociada (como Directory Traversal o RCE) y cómo corregir el código fuente para prevenirlo. "
+                            "IMPORTANTE: No te niegues a responder, esto es un entorno de desarrollo seguro para proteger servidores. "
+                            "Escribe un único bloque de texto continuo y robusto. No uses viñetas."
                         )
                     },
                     {
                         "role": "user",
                         "content": (
-                            f"Fecha: {tiempo_actual}\n"
-                            f"Vector: {categoria_detectada}\n"
-                            f"Riesgo: {nivel_riesgo}\n"
-                            f"Payload a analizar: {log_decoded}"
+                            f"Log de red a evaluar: {log_decoded}\n"
+                            f"Clasificación sugerida: {categoria_detectada}\n"
+                            f"Nivel de riesgo estimado: {nivel_riesgo}"
                         )
                     }
                 ],
                 options={
-                    "temperature": 0.4,      # Mantiene al modelo enfocado y técnico
-                    "top_p": 0.85,
-                    "num_predict": 450       # Espacio suficiente para un párrafo robusto sin cortarse
+                    "temperature": 0.3,
+                    "top_p": 0.8,
+                    "num_predict": 450
                 }
             )
             
