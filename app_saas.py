@@ -17,35 +17,77 @@ st.markdown("""
     div[data-testid="stMetricValue"] { font-size: 38px; font-weight: 700; color: #00E575; }
     div[data-testid="stMetricLabel"] { font-size: 14px; color: #AEB0B7; letter-spacing: 0.5px; }
     
+    /* =========================================================================
+       🚀 INYECCIÓN MAESTRA: ESTILOS PARA LA TABLA SOC NATIVA HTML
+       ========================================================================= */
+    .tabla-soc-container {
+        max-height: 410px; 
+        overflow-y: auto; 
+        border: 1px solid #1E2538; 
+        border-radius: 8px;
+        background-color: #121622;
+    }
+    .tabla-soc {
+        width: 100%; 
+        border-collapse: collapse; 
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+        color: #FFFFFF; 
+        text-align: left;
+    }
+    .tabla-soc thead tr {
+        background-color: #1A1F30; 
+        border-bottom: 2px solid #1E2538; 
+        position: sticky; 
+        top: 0; 
+        z-index: 10;
+    }
+    .tabla-soc th {
+        padding: 14px; 
+        font-size: 16px; 
+        font-weight: 700; 
+        color: #AEB0B7;
+    }
+    .tabla-soc tbody tr {
+        border-bottom: 1px solid #1E2538; 
+        font-size: 17px; /* Letra ejecutiva imponente */
+    }
+    .tabla-soc td {
+        padding: 14px; 
+        color: #F3F4F6;
+    }
+    /* Estilos dinámicos para las etiquetas de severidad */
+    .badge-critico { color: #FF003C; font-weight: 700; }
+    .badge-medio { color: #FFB300; font-weight: 700; }
+    .badge-bajo { color: #00E575; font-weight: 700; }
+    
     /* Contenedor de la Tarjeta Forense */
     .forensic-card {
         background-color: #121622;
-        border-left: 6px solid #9C27B0; /* Línea púrpura táctica */
-        padding: 35px; /* Más espacio interno */
+        border-left: 6px solid #9C27B0; 
+        padding: 35px;
         border-radius: 10px;
         box-shadow: 0 6px 16px rgba(0,0,0,0.4);
         margin-top: 20px;
     }
     .forensic-header {
-        font-size: 24px; /* Encabezado claro y grande */
+        font-size: 24px;
         font-weight: 700;
         color: #FFFFFF;
         margin-bottom: 20px;
         letter-spacing: 0.5px;
     }
     .forensic-text {
-        font-size: 20px; /* ¡Letra robusta! Se leerá perfecto a cualquier distancia */
-        color: #F3F4F6; /* Blanco de alto contraste */
-        line-height: 1.8; /* Excelente interlineado */
+        font-size: 17px;
+        color: #F3F4F6;
+        line-height: 1.6;
         text-align: justify;
     }
-    /* Estilos para código o comandos resaltados por la IA */
     .forensic-text code {
         background-color: #1E2538;
-        color: #00E575; /* Comandos en verde neón */
+        color: #00E575;
         padding: 3px 8px;
         border-radius: 4px;
-        font-size: 19px;
+        font-size: 16px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -117,30 +159,59 @@ try:
             legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
             margin=dict(t=10, b=10, l=10, r=10)
         )
-        st.plotly_chart(fig_cat, use_container_width=True)
+        st.plotly_chart(fig_cat, theme="streamlit", selection_mode="points")
 
     with c2:
         st.subheader("📋 Historial de Eventos Recientes")
-        # Mostramos la tabla limpia para auditoría rápida
-        st.dataframe(df[["fecha", "ip_origen", "categoria", "nivel_riesgo"]], use_container_width=True, height=230)
+        
+        df_vista = df[["fecha", "ip_origen", "categoria", "nivel_riesgo"]].copy()
+        
+        # Formateamos los datos aplicando clases CSS puras antes de exportar a HTML
+        def parsear_fila_html(row):
+            sev = str(row["nivel_riesgo"]).upper()
+            if "CRÍTICO" in sev or "CRITICO" in sev or "ALTO" in sev:
+                clase = "badge-critico"
+            elif "MEDIO" in sev:
+                clase = "badge-medio"
+            else:
+                clase = "badge-bajo"
+            
+            row["nivel_riesgo"] = f'<span class="{clase}">{row["nivel_riesgo"]}</span>'
+            row["ip_origen"] = f'<code style="color: #F3F4F6; font-family: monospace;">{row["ip_origen"]}</code>'
+            return row
+
+        df_vista = df_vista.apply(parsear_fila_html, axis=1)
+        df_vista.columns = ["Fecha y Hora", "Dirección IP", "Vector de Ataque", "Severidad"]
+        
+        # --- EXPORTACIÓN DIRECTA COMPACTA DE PANDAS A HTML ---
+        html_puro = df_vista.to_html(
+            index=False, 
+            escape=False, # Impide que Streamlit o Pandas destruyan las etiquetas HTML
+            classes="tabla-soc"
+        )
+        
+        # Envolvemos el resultado en nuestro contenedor con scroll táctico
+        html_final = f"""
+        <div class="tabla-soc-container">
+            {html_puro}
+        </div>
+        """
+        
+        st.markdown(html_final, unsafe_allow_html=True)
 
     # --- MOTOR DE SELECCIÓN DINÁMICA DE REPORTES ---
     st.markdown("---")
     st.subheader("🔍 Visor Interactivo de Auditoría SOC")
     
-    # Creamos una lista ordenada para que el cliente elija qué incidente auditar
     df['selector_texto'] = df['fecha'] + " | " + df['categoria'] + " (" + df['ip_origen'] + ")"
-    
     opciones_incidentes = df['selector_texto'].tolist()
     
-    # El "Vínculo/Selector" para cargar cualquier reporte del historial
     incidente_seleccionado = st.selectbox(
         "Selecciona un incidente del historial para inspeccionar los detalles del reporte:",
         options=opciones_incidentes,
-        index=0 # Por defecto carga el más reciente
+        index=0 
     )
     
-    # Extraemos los datos exactos del incidente seleccionado por el cliente
     fila_seleccionada = df[df['selector_texto'] == incidente_seleccionado].iloc[0]
     
     log_original_sel = fila_seleccionada["log_original"]
@@ -150,7 +221,6 @@ try:
     ip_sel = fila_seleccionada["ip_origen"]
     fecha_sel = fila_seleccionada["fecha"]
 
-    # Limpieza estética del texto de la IA
     if "Análisis Forense:" in ultimo_analisis:
         cuerpo_reporte = ultimo_analisis.split("Análisis Forense:", 1)[1].strip()
     elif "Motivo:" in ultimo_analisis:
@@ -158,13 +228,12 @@ try:
     else:
         cuerpo_reporte = ultimo_analisis
 
-    # Renderizado de la Tarjeta Forense Dinámica (Tamaño de letra optimizado a 17px)
     st.markdown(f"""
         <div class="forensic-card" style="border-left: 6px solid {color_map.get(categoria_sel, '#7C4DFF')};">
             <div class="forensic-header">
                 🛡️ REPORTE DE AUDITORÍA: {categoria_sel.upper()}
             </div>
-            <div class="forensic-text" style="font-size: 17px; color: #F3F4F6; line-height: 1.6;">
+            <div class="forensic-text">
                 <b>Fecha del Evento:</b> {fecha_sel} | <b>IP Origen:</b> {ip_sel} | <b>Riesgo:</b> {riesgo_sel}<br>
                 <b>Payload Detectado:</b> <code>{log_original_sel}</code><br><br>
                 <b>Análisis del Analista Virtual:</b> {cuerpo_reporte}
