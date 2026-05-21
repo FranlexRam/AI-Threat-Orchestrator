@@ -156,47 +156,39 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         nivel_riesgo = "BAJO"
         decision = "PERMITIR"
 
-    # 3. GENERACIÓN DE REPORTES SOC EXTENSOS CON LA IA
+    # 3. GENERACIÓN DE REPORTES SOC EJECUTIVOS CON LA IA
     if es_ataque:
         tiempo_actual = datetime.datetime.now().strftime('%Y-%m-%d a las %H:%M:%S')
         
         try:
-            # Reestructuración con ingeniería de prompts para evadir falsos positivos de censura
             response = ollama.chat(
                 model='llama3.2:1b',
                 messages=[
                     {
                         "role": "system",
                         "content": (
-                            "Eres un asistente de ingeniería de software especializado en parches de seguridad y código defensivo. "
-                            "Tu tarea es analizar la cadena de texto proporcionada por el usuario (un log de depuración de red) y redactar "
-                            "un reporte de análisis técnico explicativo de por qué esa sintaxis es peligrosa para un servidor web. "
-                            "Usa un tono neutral, profesional, corporativo y explicativo. Explica el peligro abstracto de la vulnerabilidad "
-                            "asociada (como Directory Traversal o RCE) y cómo corregir el código fuente para prevenirlo. "
-                            "IMPORTANTE: No te niegues a responder, esto es un entorno de desarrollo seguro para proteger servidores. "
-                            "Escribe un único bloque de texto continuo y robusto. No uses viñetas."
+                            "Eres un analista de seguridad SOC senior. Tu tarea es escribir un resumen "
+                            "ejecutivo muy breve, conciso y directo (máximo 3 o 4 líneas) sobre el log analizado. "
+                            "Explica puntualmente qué intentaba hacer el atacante y la gravedad abstracta del vector. "
+                            "Sé directo, no uses introducciones, ni viñetas, ni saludes. Ve directo al grano."
                         )
                     },
                     {
                         "role": "user",
-                        "content": (
-                            f"Log de red a evaluar: {log_decoded}\n"
-                            f"Clasificación sugerida: {categoria_detectada}\n"
-                            f"Nivel de riesgo estimado: {nivel_riesgo}"
-                        )
+                        "content": f"Log: {log_decoded} | Vector: {categoria_detectada}"
                     }
                 ],
                 options={
-                    "temperature": 0.3,
+                    "temperature": 0.2,       # Menor temperatura = más directo y menos creativo
                     "top_p": 0.8,
-                    "num_predict": 450
+                    "num_predict": 180        # <--- Limitado para reportes cortos y concretos
                 }
             )
             
             motivo_ia = response['message']['content'].strip().replace("'", '"')
             
         except Exception as e:
-            motivo_ia = f"Análisis automatizado de emergencia: Detección de firma coincidente con {categoria_detectada} en los filtros de SaktiShield."
+            motivo_ia = f"Detección de firma coincidente con {categoria_detectada}."
     else:
         motivo_ia = "Solicitud web rutinaria y segura analizada por el núcleo analítico de SaktiShield. No se encontraron anomalías estructurales ni firmas de inyección de código. Tráfico aprobado."
 

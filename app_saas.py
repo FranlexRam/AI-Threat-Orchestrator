@@ -20,31 +20,32 @@ st.markdown("""
     /* Contenedor de la Tarjeta Forense */
     .forensic-card {
         background-color: #121622;
-        border-left: 5px solid #9C27B0; /* Línea púrpura táctica de SaktiShield */
-        padding: 30px; /* Más aire interno para legibilidad */
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        margin-top: 15px;
+        border-left: 6px solid #9C27B0; /* Línea púrpura táctica */
+        padding: 35px; /* Más espacio interno */
+        border-radius: 10px;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+        margin-top: 20px;
     }
     .forensic-header {
-        font-size: 22px; /* Letra de encabezado más imponente */
+        font-size: 24px; /* Encabezado claro y grande */
         font-weight: 700;
         color: #FFFFFF;
-        margin-bottom: 18px;
+        margin-bottom: 20px;
         letter-spacing: 0.5px;
     }
     .forensic-text {
-        font-size: 18px; /* ¡Letra corregida! Ahora es perfectamente legible */
-        color: #E2E4E9;
-        line-height: 1.8; /* Mayor separación entre renglones para descanso visual */
+        font-size: 20px; /* ¡Letra robusta! Se leerá perfecto a cualquier distancia */
+        color: #F3F4F6; /* Blanco de alto contraste */
+        line-height: 1.8; /* Excelente interlineado */
         text-align: justify;
     }
-    /* Estilos para subsecciones o negritas dentro del reporte */
-    .forensic-text strong {
-        color: #FF5722; 
+    /* Estilos para código o comandos resaltados por la IA */
+    .forensic-text code {
+        background-color: #1E2538;
+        color: #00E575; /* Comandos en verde neón */
+        padding: 3px 8px;
+        border-radius: 4px;
         font-size: 19px;
-        margin-top: 15px;
-        display: inline-block;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -120,35 +121,56 @@ try:
 
     with c2:
         st.subheader("📋 Historial de Eventos Recientes")
-        # Mostramos la tabla con un look limpio
-        st.dataframe(df[["fecha", "ip_origen", "categoria", "nivel_riesgo"]], use_container_width=True, height=280)
+        # Mostramos la tabla limpia para auditoría rápida
+        st.dataframe(df[["fecha", "ip_origen", "categoria", "nivel_riesgo"]], use_container_width=True, height=230)
 
-    # --- DETALLE DEL ÚLTIMO ANÁLISIS SOC (UI/UX REDISEÑADA) ---
+    # --- MOTOR DE SELECCIÓN DINÁMICA DE REPORTES ---
     st.markdown("---")
-    st.subheader("🕵️ Reporte de Auditoría IA (Último Evento)")
+    st.subheader("🔍 Visor Interactivo de Auditoría SOC")
     
-    # Extraemos el log y limpiamos posibles problemas de formato de texto
-    ultimo_analisis = df.iloc[0]["analisis_ia"]
+    # Creamos una lista ordenada para que el cliente elija qué incidente auditar
+    df['selector_texto'] = df['fecha'] + " | " + df['categoria'] + " (" + df['ip_origen'] + ")"
     
-    # Limpieza estética: Si el texto contiene la metadata del string, la separamos para dejar solo el cuerpo de la IA
+    opciones_incidentes = df['selector_texto'].tolist()
+    
+    # El "Vínculo/Selector" para cargar cualquier reporte del historial
+    incidente_seleccionado = st.selectbox(
+        "Selecciona un incidente del historial para inspeccionar los detalles del reporte:",
+        options=opciones_incidentes,
+        index=0 # Por defecto carga el más reciente
+    )
+    
+    # Extraemos los datos exactos del incidente seleccionado por el cliente
+    fila_seleccionada = df[df['selector_texto'] == incidente_seleccionado].iloc[0]
+    
+    log_original_sel = fila_seleccionada["log_original"]
+    ultimo_analisis = fila_seleccionada["analisis_ia"]
+    categoria_sel = fila_seleccionada["categoria"]
+    riesgo_sel = fila_seleccionada["nivel_riesgo"]
+    ip_sel = fila_seleccionada["ip_origen"]
+    fecha_sel = fila_seleccionada["fecha"]
+
+    # Limpieza estética del texto de la IA
     if "Análisis Forense:" in ultimo_analisis:
-        partes = ultimo_analisis.split("Análisis Forense:", 1)
-        cuerpo_reporte = partes[1].strip()
+        cuerpo_reporte = ultimo_analisis.split("Análisis Forense:", 1)[1].strip()
+    elif "Motivo:" in ultimo_analisis:
+        cuerpo_reporte = ultimo_analisis.split("Motivo:", 1)[1].strip()
     else:
         cuerpo_reporte = ultimo_analisis
 
-    # Renderizado elegante utilizando HTML inyectado de forma segura en la tarjeta custom
+    # Renderizado de la Tarjeta Forense Dinámica (Tamaño de letra optimizado a 17px)
     st.markdown(f"""
-        <div class="forensic-card">
+        <div class="forensic-card" style="border-left: 6px solid {color_map.get(categoria_sel, '#7C4DFF')};">
             <div class="forensic-header">
-                🔍 ANÁLISIS FORENSE PERICIAL EXPERTO - SOC NIVEL 3
+                🛡️ REPORTE DE AUDITORÍA: {categoria_sel.upper()}
             </div>
-            <div class="forensic-text">
-                {cuerpo_reporte}
+            <div class="forensic-text" style="font-size: 17px; color: #F3F4F6; line-height: 1.6;">
+                <b>Fecha del Evento:</b> {fecha_sel} | <b>IP Origen:</b> {ip_sel} | <b>Riesgo:</b> {riesgo_sel}<br>
+                <b>Payload Detectado:</b> <code>{log_original_sel}</code><br><br>
+                <b>Análisis del Analista Virtual:</b> {cuerpo_reporte}
             </div>
         </div>
     """, unsafe_allow_html=True)
 
 except Exception as e:
-    st.error(f"Aún no hay datos en la base de datos o hubo un error: {e}")
-    st.info("Asegúrate de haber corrido brain.py y haber lanzado al menos un ataque desde Kali.")
+    st.error(f"Error al procesar la interfaz: {e}")
