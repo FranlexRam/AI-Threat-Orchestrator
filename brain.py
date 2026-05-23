@@ -7,7 +7,11 @@ import os
 import json
 import sqlite3
 import requests
+import urllib.parse
 from dotenv import load_dotenv
+
+# 🚀 PASO 2 (IMPORTACIÓN): Traemos el módulo avanzado SOAR que programamos
+from orchestrator_core import SaktiSOAR
 
 # Cargar las variables del archivo .env
 load_dotenv()
@@ -32,7 +36,7 @@ def init_db():
 
 init_db() # Llama a la función aquí mismo
 
-#Función de Telegram Alert
+# Función de Telegram Alert
 def send_telegram_alert(categoria, riesgo, ip):
     """Envía una alerta de seguridad estructurada a Telegram"""
     token = os.getenv("TELEGRAM_TOKEN")
@@ -76,10 +80,8 @@ def simulate_firewall_block(ip, reason):
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
 
 def extraer_categoria(reporte):
-    # Convertimos a mayúsculas para que la búsqueda no falle por minúsculas
     reporte_up = reporte.upper()
     
-    # Búsqueda por palabras clave (Mucho más seguro que Regex rígido)
     if "SQL INJECTION" in reporte_up:
         return "SQL Injection"
     elif "XSS" in reporte_up or "SCRIPT" in reporte_up:
@@ -93,34 +95,26 @@ def extraer_categoria(reporte):
     elif "LEGÍTIMO" in reporte_up or "PERMITIR" in reporte_up:
         return "Tráfico Legítimo"
     
-    # Si nada de lo anterior funciona, intentamos el Regex como último recurso
     match = re.search(r"CATEGORÍA:\s*(.*)", reporte, re.IGNORECASE)
     if match:
         return match.group(1).strip()
         
     return "Otras Amenazas"
 
-import urllib.parse  # Asegúrate de tener esta importación al inicio del archivo si no está
-
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
 
-    # 1. NORMALIZACIÓN AVANZADA: Decodificamos caracteres URL y forzamos el reemplazo de '+' por espacios reales
+    # 1. NORMALIZACIÓN AVANZADA
     log_decoded = urllib.parse.unquote(log_entry).replace('+', ' ')
     log_upper = log_decoded.upper()
-    
     es_ataque = True
     
-    # 2. MOTOR DE FIRMAS MEJORADO CON REGEX (Indestructible a variaciones de formato)
-    # Detecta <script, script>, alert(, onload=, onerror=, o cualquier etiqueta HTML básica
-    
-    # Vector 1: XSS
+    # 2. MOTOR DE FIRMAS MEJORADO CON REGEX
     if re.search(r"<SCRIPT|SCRIPT>|ALERT\(|ONLOAD=|ONERROR=|<[A-Z]+>", log_upper):
         categoria_detectada = "XSS (Cross-Site Scripting)"
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
-
-    # Vector 2: SQL Injection    
+   
     elif re.search(r"UNION\(?(\/\*.*\*\/|\s)+SELECT", log_upper) or \
          re.search(r"OR(\/\*.*\*\/|\s)+\d+=\d+", log_upper) or \
          any(k in log_upper for k in ["SELECT ", "--"]):
@@ -128,21 +122,16 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
         
-    # Vector 3: Directory Traversal (Mejorado con Regex para variaciones de barras)
     elif re.search(r"\.\.\/|\.\.\\|/ETC/PASSWD|BOOT\.INI|WIN\.INI", log_upper):
         categoria_detectada = "Directory Traversal"
         nivel_riesgo = "ALTO"
         decision = "BLOQUEAR"
 
-    # Vector 4: Remote Code Execution (RCE)
-    # Detecta de forma estricta metacaracteres de encadenamiento (; , &&, ||, |) seguidos de comandos del sistema
     elif re.search(r"(;|&&|\|\||\|)[\s\+]*_*(WHOAMI|CAT\s+|ID|UNAME|DIR|IPCONFIG|WGET|CURL)", log_upper):
         categoria_detectada = "Remote Code Execution (RCE)"
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
 
-    # Vector 5: SSRF (Server-Side Request Forgery)
-    # Detecta cuando intentan forzar al servidor a mirar a su propia red local o metadatos de nube
     elif re.search(r"(LOCALHOST|127\.0\.0\.1|169\.254\.169\.254)", log_upper) and \
          any(k in log_upper for k in ["URL=", "URI=", "PATH=", "DEST=", "REDIRECT="]):
         categoria_detectada = "SSRF Attack"
@@ -150,7 +139,6 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         decision = "BLOQUEAR"    
         
     else:
-        # Si está completamente limpio, pasa directo sin tocar la IA
         es_ataque = False
         categoria_detectada = "Tráfico Legítimo"
         nivel_riesgo = "BAJO"
@@ -158,8 +146,6 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
     # 3. GENERACIÓN DE REPORTES SOC EJECUTIVOS CON LA IA
     if es_ataque:
-        tiempo_actual = datetime.datetime.now().strftime('%Y-%m-%d a las %H:%M:%S')
-        
         try:
             response = ollama.chat(
                 model='llama3.2:1b',
@@ -179,23 +165,27 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
                     }
                 ],
                 options={
-                    "temperature": 0.2,       # Menor temperatura = más directo y menos creativo
+                    "temperature": 0.2,
                     "top_p": 0.8,
-                    "num_predict": 180        # <--- Limitado para reportes cortos y concretos
+                    "num_predict": 180
                 }
             )
-            
             motivo_ia = response['message']['content'].strip().replace("'", '"')
-            
         except Exception as e:
             motivo_ia = f"Detección de firma coincidente con {categoria_detectada}."
     else:
         motivo_ia = "Solicitud web rutinaria y segura analizada por el núcleo analítico de SaktiShield. No se encontraron anomalías estructurales ni firmas de inyección de código. Tráfico aprobado."
 
-    # Formateamos el bloque de análisis limpio eliminando duplicados mecánicos
     analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Análisis Forense: {motivo_ia}"
 
-    # 4. APLICACIÓN DE POLÍTICAS EN EL FIREWALL
+    # 4. APLICACIÓN DE POLÍTICAS EN EL FIREWALL & INTEGRACIÓN SOAR
+    # Ejecutamos el playbook autónomo en caliente según los datos calculados
+    accion_tomada = SaktiSOAR.ejecutar_playbook(
+        categoria_ataque=categoria_detectada,
+        ip_origen=client_ip,
+        nivel_riesgo=nivel_riesgo
+    )
+
     if decision == "BLOQUEAR":
         status = "BLOQUEADO"
         simulate_firewall_block(client_ip, f"Firma detectada: {categoria_detectada}")
@@ -205,17 +195,20 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     else:
         status = "PERMITIDO"
 
-    # 5. Guardado en la base de datos
-    save_report_v2(log_entry, analysis_text, status, client_ip, nivel_riesgo, categoria_detectada)
+    # 5. Guardado en la base de datos (Le pasamos el nuevo parámetro 'accion_tomada')
+    save_report_v2(log_entry, analysis_text, status, client_ip, nivel_riesgo, categoria_detectada, accion_tomada)
 
     return f"{status} - {nivel_riesgo} ({categoria_detectada})"
 
-def save_report_v2(log_entry, analysis, status, client_ip, nivel_riesgo, categoria):
+# Modificamos la firma de la función para que acepte el nuevo campo de mitigación
+def save_report_v2(log_entry, analysis, status, client_ip, nivel_riesgo, categoria, accion_mitigacion):
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
+    
+    # Añadimos 'accion_mitigacion' tanto a las columnas como a los VALUES (?, ?, ...)
     cursor.execute('''
-            INSERT INTO incidentes (fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO incidentes (fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 
             client_ip, 
@@ -223,16 +216,15 @@ def save_report_v2(log_entry, analysis, status, client_ip, nivel_riesgo, categor
             categoria, 
             nivel_riesgo, 
             status, 
-            log_entry
+            log_entry,
+            accion_mitigacion # <-- El valor real salvado en la celda
         ))
     conn.commit()
     conn.close()
-    print(f"[DB] Incidente guardado como {status} ({nivel_riesgo}) -> Categoría: {categoria}")
+    print(f"[DB] Incidente guardado con mitigación activa: {accion_mitigacion}")
 
 def start_listener():
-    # Creamos el socket (nuestra antena de red)
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # Escuchamos en todas las interfaces del Mac en el puerto 9999
     servidor.bind(('0.0.0.0', 9999))
     servidor.listen(1)
     
@@ -242,13 +234,10 @@ def start_listener():
     print("="*50 + "\n")
     
     while True:
-        # Aceptamos la conexión de Kali
         cliente, direccion = servidor.accept()
-        # Recibimos el mensaje
         log_recibido = cliente.recv(1024).decode('utf-8')
         
         if log_recibido:
-            # Mandamos el log a la IA
             resultado = orchestrator_ai(log_recibido, client_ip=direccion[0])
             print(f"\n[DECISIÓN FINAL]:\n{resultado}")
             print("\n" + "-"*30 + "\n[*] Esperando siguiente evento...")

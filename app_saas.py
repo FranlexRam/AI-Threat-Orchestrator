@@ -17,9 +17,7 @@ st.markdown("""
     div[data-testid="stMetricValue"] { font-size: 38px; font-weight: 700; color: #00E575; }
     div[data-testid="stMetricLabel"] { font-size: 14px; color: #AEB0B7; letter-spacing: 0.5px; }
     
-    /* =========================================================================
-       🚀 INYECCIÓN MAESTRA: ESTILOS PARA LA TABLA SOC NATIVA HTML
-       ========================================================================= */
+    /* Estilos de la tabla SOC Nativa HTML */
     .tabla-soc-container {
         max-height: 410px; 
         overflow-y: auto; 
@@ -49,7 +47,7 @@ st.markdown("""
     }
     .tabla-soc tbody tr {
         border-bottom: 1px solid #1E2538; 
-        font-size: 17px; /* Letra ejecutiva imponente */
+        font-size: 17px; 
     }
     .tabla-soc td {
         padding: 14px; 
@@ -109,7 +107,8 @@ with col_titulo:
 # --- FUNCIÓN PARA LEER LA DB ---
 def cargar_datos():
     conn = sqlite3.connect('security_vault.db')
-    df = pd.read_sql_query("SELECT * FROM incidentes ORDER BY fecha DESC", conn)
+    # 🌟 AJUSTE 1: Incluimos explícitamente la columna 'accion_mitigacion' en la lectura
+    df = pd.read_sql_query("SELECT id, fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion FROM incidentes ORDER BY fecha DESC", conn)
     conn.close()
     return df
 
@@ -164,9 +163,9 @@ try:
     with c2:
         st.subheader("📋 Historial de Eventos Recientes")
         
-        df_vista = df[["fecha", "ip_origen", "categoria", "nivel_riesgo"]].copy()
+        # 🌟 AJUSTE 2: Añadimos 'accion_mitigacion' al DataFrame de la vista de la tabla
+        df_vista = df[["fecha", "ip_origen", "categoria", "nivel_riesgo", "accion_mitigacion"]].copy()
         
-        # Formateamos los datos aplicando clases CSS puras antes de exportar a HTML
         def parsear_fila_html(row):
             sev = str(row["nivel_riesgo"]).upper()
             if "CRÍTICO" in sev or "CRITICO" in sev or "ALTO" in sev:
@@ -178,19 +177,22 @@ try:
             
             row["nivel_riesgo"] = f'<span class="{clase}">{row["nivel_riesgo"]}</span>'
             row["ip_origen"] = f'<code style="color: #F3F4F6; font-family: monospace;">{row["ip_origen"]}</code>'
+            # Le damos estilo al texto de la mitigación para que luzca limpio
+            row["accion_mitigacion"] = f'<span style="color: #AEB0B7; font-style: italic;">{row["accion_mitigacion"]}</span>'
             return row
 
         df_vista = df_vista.apply(parsear_fila_html, axis=1)
-        df_vista.columns = ["Fecha y Hora", "Dirección IP", "Vector de Ataque", "Severidad"]
+        
+        # Cambiamos los nombres de las columnas para los encabezados de la tabla HTML
+        df_vista.columns = ["Fecha y Hora", "Dirección IP", "Vector de Ataque", "Severidad", "Acción Defensiva (SOAR)"]
         
         # --- EXPORTACIÓN DIRECTA COMPACTA DE PANDAS A HTML ---
         html_puro = df_vista.to_html(
             index=False, 
-            escape=False, # Impide que Streamlit o Pandas destruyan las etiquetas HTML
+            escape=False, 
             classes="tabla-soc"
         )
         
-        # Envolvemos el resultado en nuestro contenedor con scroll táctico
         html_final = f"""
         <div class="tabla-soc-container">
             {html_puro}
@@ -220,6 +222,7 @@ try:
     riesgo_sel = fila_seleccionada["nivel_riesgo"]
     ip_sel = fila_seleccionada["ip_origen"]
     fecha_sel = fila_seleccionada["fecha"]
+    mitigacion_sel = fila_seleccionada["accion_mitigacion"]
 
     if "Análisis Forense:" in ultimo_analisis:
         cuerpo_reporte = ultimo_analisis.split("Análisis Forense:", 1)[1].strip()
@@ -235,6 +238,7 @@ try:
             </div>
             <div class="forensic-text">
                 <b>Fecha del Evento:</b> {fecha_sel} | <b>IP Origen:</b> {ip_sel} | <b>Riesgo:</b> {riesgo_sel}<br>
+                <b>Mitigación Ejecutada:</b> <span style="color: #00E575; font-weight: 600;">{mitigacion_sel}</span><br>
                 <b>Payload Detectado:</b> <code>{log_original_sel}</code><br><br>
                 <b>Análisis del Analista Virtual:</b> {cuerpo_reporte}
             </div>
