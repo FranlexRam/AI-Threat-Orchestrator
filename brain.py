@@ -36,6 +36,35 @@ def init_db():
 
 init_db() # Llama a la función aquí mismo
 
+# --- 🧠 MOTOR DE CORRELACIÓN DE EVENTOS (NUEVO) ---
+def obtener_historial_reciente(client_ip, minutos=5):
+    """
+    Consulta la base de datos para ver si la IP atacó en los últimos X minutos.
+    Devuelve una lista con las categorías de los ataques previos detectados.
+    """
+    conn = sqlite3.connect('security_vault.db')
+    cursor = conn.cursor()
+    
+    # Buscamos incidentes recientes de la misma IP excluyendo el tráfico legítimo
+    query = """
+        SELECT categoria FROM incidentes 
+        WHERE ip_origen = ? 
+        AND categoria != 'Tráfico Legítimo'
+        AND fecha >= datetime('now', '-5 minutes', 'localtime')
+    """
+    try:
+        cursor.execute(query, (client_ip,))
+        resultados = cursor.fetchall()
+        historial = [fila[0] for fila in resultados]
+    except Exception as e:
+        print(f"[⚠️ CORRELACIÓN ERROR]: No se pudo leer el historial: {e}")
+        historial = []
+    finally:
+        conn.close()
+        
+    return historial
+
+
 # Función de Telegram Alert
 def send_telegram_alert(categoria, riesgo, ip):
     """Envía una alerta de seguridad estructurada a Telegram"""
@@ -144,8 +173,18 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         nivel_riesgo = "BAJO"
         decision = "PERMITIR"
 
-    # 3. GENERACIÓN DE REPORTES SOC EJECUTIVOS CON LA IA
+    # 3. CONTEXTO DE CORRELACIÓN Y GENERACIÓN DE REPORTES SOC CON IA
     if es_ataque:
+        # Extraemos lo que hizo esta IP en los últimos 5 minutos
+        historial_previo = obtener_historial_reciente(client_ip, minutos=5)
+        
+        # Estructuramos el contexto temporal para la IA
+        if historial_previo:
+            contexto_correlacion = f"¡ALERTA REPETIDA! Esta IP ya generó los siguientes incidentes en los últimos 5 minutos: {', '.join(historial_previo)}."
+            print(f"[🔥 CORRELACIÓN]: IP {client_ip} reincidente. Historial enviado a la IA.")
+        else:
+            contexto_correlacion = "Esta IP no registra otros ataques en la última ventana de 5 minutos."
+
         try:
             response = ollama.chat(
                 model='llama3.2:1b',
@@ -153,15 +192,16 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
                     {
                         "role": "system",
                         "content": (
-                            "Eres un analista de seguridad SOC senior. Tu tarea es escribir un resumen "
-                            "ejecutivo muy breve, conciso y directo (máximo 3 o 4 líneas) sobre el log analizado. "
-                            "Explica puntualmente qué intentaba hacer el atacante y la gravedad abstracta del vector. "
-                            "Sé directo, no uses introducciones, ni viñetas, ni saludes. Ve directo al grano."
+                            "Eres un analista de seguridad SOC senior experto en correlación de eventos. Tu tarea es escribir un resumen "
+                            "ejecutivo muy breve y directo (máximo 3 o 4 líneas) sobre el ataque actual. "
+                            "IMPORTANTE: Te daremos un 'Contexto de Correlación' que muestra si la IP ha atacado antes recientemente. "
+                            "Si hay historial previo, tu análisis DEBE explicar si estamos ante una campaña estructurada multi-vector o persistente. "
+                            "Sé directo, ve al grano sin introducciones ni saludos."
                         )
                     },
                     {
                         "role": "user",
-                        "content": f"Log: {log_decoded} | Vector: {categoria_detectada}"
+                        "content": f"Log Actual: {log_decoded} | Vector Actual: {categoria_detectada} | Contexto de Correlación: {contexto_correlacion}"
                     }
                 ],
                 options={
@@ -179,7 +219,6 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Análisis Forense: {motivo_ia}"
 
     # 4. APLICACIÓN DE POLÍTICAS EN EL FIREWALL & INTEGRACIÓN SOAR
-    # Ejecutamos el playbook autónomo en caliente según los datos calculados
     accion_tomada = SaktiSOAR.ejecutar_playbook(
         categoria_ataque=categoria_detectada,
         ip_origen=client_ip,
@@ -195,17 +234,14 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     else:
         status = "PERMITIDO"
 
-    # 5. Guardado en la base de datos (Le pasamos el nuevo parámetro 'accion_tomada')
+    # 5. Guardado en la base de datos
     save_report_v2(log_entry, analysis_text, status, client_ip, nivel_riesgo, categoria_detectada, accion_tomada)
 
     return f"{status} - {nivel_riesgo} ({categoria_detectada})"
 
-# Modificamos la firma de la función para que acepte el nuevo campo de mitigación
 def save_report_v2(log_entry, analysis, status, client_ip, nivel_riesgo, categoria, accion_mitigacion):
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
-    
-    # Añadimos 'accion_mitigacion' tanto a las columnas como a los VALUES (?, ?, ...)
     cursor.execute('''
             INSERT INTO incidentes (fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -217,7 +253,7 @@ def save_report_v2(log_entry, analysis, status, client_ip, nivel_riesgo, categor
             nivel_riesgo, 
             status, 
             log_entry,
-            accion_mitigacion # <-- El valor real salvado en la celda
+            accion_mitigacion
         ))
     conn.commit()
     conn.close()
@@ -230,7 +266,7 @@ def start_listener():
     
     print("\n" + "="*50)
     print("[*] ORQUESTRADOR ACTIVO: Escuchando en el puerto 9999...")
-    print("[*] Esperando señales de ataque desde Kali Linux.")
+    print("[*] Esperando señales de ataque...")
     print("="*50 + "\n")
     
     while True:
