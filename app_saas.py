@@ -3,11 +3,12 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import os
+import time  # 🚀 Importamos time para controlar el ciclo de vida
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="SaktiShield Analytics", page_icon="🛡️", layout="wide")
 
-# --- ESTILOS CSS PERSONALIZADOS (LOOK PREMIUM EXPERTO) ---
+# --- ESTILOS CSS PERSONALIZADOS (LOOK PREMIUM EXPERTO - ELEMENTOS OLED) ---
 st.markdown("""
     <style>
     /* Fondo general oscuro táctico */
@@ -107,13 +108,21 @@ with col_titulo:
 # --- FUNCIÓN PARA LEER LA DB ---
 def cargar_datos():
     conn = sqlite3.connect('security_vault.db')
-    # 🌟 AJUSTE 1: Incluimos explícitamente la columna 'accion_mitigacion' en la lectura
     df = pd.read_sql_query("SELECT id, fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion FROM incidentes ORDER BY fecha DESC", conn)
     conn.close()
     return df
 
+# 📡 MECANISMO DE CONTROL TEMPORAL EN CALIENTE (Evita parpadeos bruscos de UI)
+if "ultimo_conteo" not in st.session_state:
+    st.session_state.ultimo_conteo = 0
+
 try:
     df = cargar_datos()
+    conteo_actual = len(df)
+
+    # Si entran nuevos incidentes por la API, disparamos el redibujado de métricas de forma limpia
+    if conteo_actual != st.session_state.ultimo_conteo:
+        st.session_state.ultimo_conteo = conteo_actual
 
     # --- MÉTRICAS PRINCIPALES ---
     st.markdown("---")
@@ -163,7 +172,6 @@ try:
     with c2:
         st.subheader("📋 Historial de Eventos Recientes")
         
-        # 🌟 AJUSTE 2: Añadimos 'accion_mitigacion' al DataFrame de la vista de la tabla
         df_vista = df[["fecha", "ip_origen", "categoria", "nivel_riesgo", "accion_mitigacion"]].copy()
         
         def parsear_fila_html(row):
@@ -177,28 +185,14 @@ try:
             
             row["nivel_riesgo"] = f'<span class="{clase}">{row["nivel_riesgo"]}</span>'
             row["ip_origen"] = f'<code style="color: #F3F4F6; font-family: monospace;">{row["ip_origen"]}</code>'
-            # Le damos estilo al texto de la mitigación para que luzca limpio
             row["accion_mitigacion"] = f'<span style="color: #AEB0B7; font-style: italic;">{row["accion_mitigacion"]}</span>'
             return row
 
         df_vista = df_vista.apply(parsear_fila_html, axis=1)
-        
-        # Cambiamos los nombres de las columnas para los encabezados de la tabla HTML
         df_vista.columns = ["Fecha y Hora", "Dirección IP", "Vector de Ataque", "Severidad", "Acción Defensiva (SOAR)"]
         
-        # --- EXPORTACIÓN DIRECTA COMPACTA DE PANDAS A HTML ---
-        html_puro = df_vista.to_html(
-            index=False, 
-            escape=False, 
-            classes="tabla-soc"
-        )
-        
-        html_final = f"""
-        <div class="tabla-soc-container">
-            {html_puro}
-        </div>
-        """
-        
+        html_puro = df_vista.to_html(index=False, escape=False, classes="tabla-soc")
+        html_final = f'<div class="tabla-soc-container">{html_puro}</div>'
         st.markdown(html_final, unsafe_allow_html=True)
 
     # --- MOTOR DE SELECCIÓN DINÁMICA DE REPORTES ---
@@ -244,6 +238,11 @@ try:
             </div>
         </div>
     """, unsafe_allow_html=True)
+
+    # 📡 INTERVALO DE AUTOMATIZACIÓN EN SEGUNDOS:
+    # Fuerza a Streamlit a revisar la Base de Datos cada 2 segundos sin bloquear el hilo principal.
+    time.sleep(2)
+    st.rerun()
 
 except Exception as e:
     st.error(f"Error al procesar la interfaz: {e}")
