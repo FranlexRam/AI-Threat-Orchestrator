@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  # 🧠 Contenedor de la API e Ingesta
+  saktishield-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./security_vault.db:/app/security_vault.db # Compartimos la DB local para que no se borren los datos al apagar el contenedor
+
+  # 📊 Contenedor del Dashboard OLED
+  saktishield-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    depends_on:
+      - saktishield-backend
+    volumes:
+      - ./security_vault.db:/app/security_vault.db
