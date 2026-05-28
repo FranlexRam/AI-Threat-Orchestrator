@@ -1,6 +1,7 @@
 import asyncio
 import urllib.parse
 import datetime
+import sqlite3  # 🟢 AGREGADO: Necesario para consultar la base de datos de tokens
 from fastapi import FastAPI, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -12,8 +13,8 @@ from brain import orchestrator_ai
 # Inicializamos la plataforma API SaaS
 app = FastAPI(
     title="SaktiShield Corporate API Ingestion Pipeline", 
-    version="1.1.0",
-    description="Endpoint universal de ingesta con autenticación perimetral por API Key."
+    version="1.2.0",  # Escalamos la versión por el backend con persistencia
+    description="Endpoint universal de ingesta con autenticación perimetral conectada a Base de Datos."
 )
 
 app.add_middleware(
@@ -24,24 +25,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔑 CONTROL DE ACCESO CORPORATIVO (Simulación de Clientes en Memoria)
-# En el futuro, esto se validará contra tu base de datos central de suscripciones SaaS
-CLIENTES_AUTORIZADOS = {
-    "sakti_token_empresa_alfa_9942": "Empresa Alfa C.A.",
-    "sakti_token_bravo_secure_7711": "Corporación Bravo"
-}
-
 # Configuramos FastAPI para que busque obligatoriamente esta cabecera en los HTTP Headers
 X_SAKTI_TOKEN = APIKeyHeader(name="X-Sakti-Token", auto_error=False)
 
 def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
-    """Filtro criptográfico en RAM: Valida si la empresa tiene su suscripción activa."""
-    if not api_key or api_key not in CLIENTES_AUTORIZADOS:
+    """
+    🧠 FILTRO DINÁMICO: Busca y valida la credencial directamente 
+    en la Base de Datos en tiempo real para verificar suscripciones.
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Acceso Denegado: X-Sakti-Token ausente en las cabeceras."
+        )
+    
+    # 🟢 CONEXIÓN EN CALIENTE A LA DB
+    conn = sqlite3.connect("security_vault.db")
+    cursor = conn.cursor()
+    
+    # Consultamos si el token exacto existe y si la cuenta está 'ACTIVO'
+    cursor.execute(
+        "SELECT empresa_name FROM sakti_customers WHERE api_key = ? AND estatus = 'ACTIVO'", 
+        (api_key,)
+    )
+    cliente = cursor.fetchone()
+    conn.close()
+    
+    # Si la consulta no devuelve filas, el token es falso o fue revocado
+    if not cliente:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Acceso Denegado: X-Sakti-Token inválido o revocado de la firma."
         )
-    return CLIENTES_AUTORIZADOS[api_key]  # Retorna el nombre de la empresa autenticada
+    
+    return cliente[0]  # Retorna el nombre de la empresa real extraído de la fila
 
 class LogPayload(pydantic.BaseModel):
     client_ip: str
@@ -50,7 +67,6 @@ class LogPayload(pydantic.BaseModel):
 eventos_tiempo_real = asyncio.Queue()
 
 @app.post("/api/v1/ingest")
-# 🔒 Inyectamos la validación de la API Key como una dependencia obligatoria
 async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = Security(validar_api_key)):
     """
     Endpoint Ejecutivo Autenticado: Recibe logs de empresas autorizadas, 
@@ -93,7 +109,7 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         alerta_dashboard = {
             "ip": ip_cliente,
             "log": log_crudo,
-            "resultado": f"[{empresa_cliente}] {resultado_brain}", # Añadimos contexto de la empresa en la UI
+            "resultado": f"[{empresa_cliente}] {resultado_brain}", 
             "status": status_final,
             "timestamp": datetime.datetime.now().strftime('%H:%M:%S')
         }
