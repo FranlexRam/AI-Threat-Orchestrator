@@ -8,6 +8,9 @@ services:
       dockerfile: Dockerfile.backend
     ports:
       - "8000:8000"
+    # 🟢 INYECTAMOS LAS VARIABLES DE ENTORNO (Token de Telegram y Chat ID)
+    env_file:
+      - .env
     volumes:
       - ./security_vault.db:/app/security_vault.db # Compartimos la DB local para que no se borren los datos al apagar el contenedor
 
