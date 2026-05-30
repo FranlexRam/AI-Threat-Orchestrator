@@ -11,8 +11,13 @@ services:
     # 🟢 INYECTAMOS LAS VARIABLES DE ENTORNO (Token de Telegram y Chat ID)
     env_file:
       - .env
+    # 🔗 Esto le permite al contenedor hablar con el Ollama de tu Mac
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 💾 Esto evita que la base de datos se borre al reiniciar, arreglando la correlación
     volumes:
-      - ./security_vault.db:/app/security_vault.db # Compartimos la DB local para que no se borren los datos al apagar el contenedor
+      - ./security_vault.db:/app/security_vault.db  # Compartimos la DB local para que no se borren los datos al apagar el contenedor
+      - ./blacklist.txt:/app/blacklist.txt
 
   # 📊 Contenedor del Dashboard OLED
   saktishield-frontend:
@@ -21,7 +26,10 @@ services:
       dockerfile: Dockerfile.frontend
     ports:
       - "8501:8501"
+    env_file:
+      - .env
     depends_on:
       - saktishield-backend
     volumes:
       - ./security_vault.db:/app/security_vault.db
+      - ./logo_sakti.png:/app/logo_sakti.png

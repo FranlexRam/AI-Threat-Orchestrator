@@ -28,24 +28,23 @@ def init_db():
             categoria TEXT,
             nivel_riesgo TEXT,
             estatus TEXT,
-            log_original TEXT
+            log_original TEXT,
+            accion_mitigacion TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
-init_db() # Llama a la función aquí mismo
+init_db()
 
-# --- 🧠 MOTOR DE CORRELACIÓN DE EVENTOS (NUEVO) ---
+# --- 🧠 MOTOR DE CORRELACIÓN DE EVENTOS ---
 def obtener_historial_reciente(client_ip, minutos=5):
     """
-    Consulta la base de datos para ver si la IP atacó en los últimos X minutos.
-    Devuelve una lista con las categorías de los ataques previos detectados.
+    Consulta la base de datos para ver si la IP atacó o falló autenticación recientemente.
     """
     conn = sqlite3.connect('security_vault.db')
     cursor = conn.cursor()
     
-    # Buscamos incidentes recientes de la misma IP excluyendo el tráfico legítimo
     query = """
         SELECT categoria FROM incidentes 
         WHERE ip_origen = ? 
@@ -98,7 +97,6 @@ def send_telegram_alert(categoria, riesgo, ip):
     except Exception as e:
         print(f"[ERROR]: Fallo crítico en el envío de alerta: {e}")
     
-# Archivo que funcionará como nuestra "Lista Negra"
 BLACKLIST_FILE = "blacklist.txt"
 
 def simulate_firewall_block(ip, reason):
@@ -107,28 +105,6 @@ def simulate_firewall_block(ip, reason):
     with open(BLACKLIST_FILE, "a") as f:
         f.write(f"{ip} | {timestamp} | Razón: {reason}\n")
     print(f"\n[SISTEMA]: 🛡️ EJECUTANDO BLOQUEO: La IP {ip} ha sido enviada al Firewall.")
-
-def extraer_categoria(reporte):
-    reporte_up = reporte.upper()
-    
-    if "SQL INJECTION" in reporte_up:
-        return "SQL Injection"
-    elif "XSS" in reporte_up or "SCRIPT" in reporte_up:
-        return "XSS (Cross-Site Scripting)"
-    elif "DIRECTORY TRAVERSAL" in reporte_up or "PASSWD" in reporte_up:
-        return "Directory Traversal"
-    elif "BRUTE FORCE" in reporte_up:
-        return "Brute Force"
-    elif "DOS" in reporte_up or "DENIAL OF SERVICE" in reporte_up:
-        return "Denial of Service"
-    elif "LEGÍTIMO" in reporte_up or "PERMITIR" in reporte_up:
-        return "Tráfico Legítimo"
-    
-    match = re.search(r"CATEGORÍA:\s*(.*)", reporte, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-        
-    return "Otras Amenazas"
 
 def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     print(f"[*] Procesando evento desde {client_ip}...")
@@ -166,6 +142,12 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         categoria_detectada = "SSRF Attack"
         nivel_riesgo = "ALTO"
         decision = "BLOQUEAR"    
+
+    # 🎯 NUEVA FIRMA: Captura intentos fallidos de inicio de sesión de forma proactiva
+    elif any(k in log_upper for k in ["FAILED LOGIN", "INVALID CREDENTIALS", "ACCESS DENIED"]) or "ATTEMPT" in log_upper:
+        categoria_detectada = "Brute Force"
+        nivel_riesgo = "MEDIO"
+        decision = "EVALUAR" # Deja que la correlación temporal decida si bloquea
         
     else:
         es_ataque = False
@@ -174,16 +156,20 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         decision = "PERMITIR"
 
     # 3. CONTEXTO DE CORRELACIÓN Y GENERACIÓN DE REPORTES SOC CON IA
-    if es_ataque:
+    if categoria_detectada != "Tráfico Legítimo":
         # Extraemos lo que hizo esta IP en los últimos 5 minutos
         historial_previo = obtener_historial_reciente(client_ip, minutos=5)
         
-        # Estructuramos el contexto temporal para la IA
+        # Lógica de escalamiento por volumen (Fuerza Bruta)
+        if categoria_detectada == "Brute Force" and len(historial_previo) >= 3:
+            nivel_riesgo = "ALTO"
+            decision = "BLOQUEAR"
+            print(f"[⚠️ ALERTA]: Fuerza Bruta Confirmada por volumen desde {client_ip}. Escalando a BLOQUEO.")
+            
         if historial_previo:
-            contexto_correlacion = f"¡ALERTA REPETIDA! Esta IP ya generó los siguientes incidentes en los últimos 5 minutos: {', '.join(historial_previo)}."
-            print(f"[🔥 CORRELACIÓN]: IP {client_ip} reincidente. Historial enviado a la IA.")
+            contexto_correlacion = f"¡IP REINCIDENTE! Ha generado {len(historial_previo)} alertas previas de tipo: {', '.join(historial_previo)}."
         else:
-            contexto_correlacion = "Esta IP no registra otros ataques en la última ventana de 5 minutos."
+            contexto_correlacion = "No registra incidentes previos en la ventana de tiempo analizada."
 
         try:
             response = ollama.chat(
@@ -192,31 +178,31 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
                     {
                         "role": "system",
                         "content": (
-                            "Eres un analista de seguridad SOC senior experto en correlación de eventos. Tu tarea es escribir un resumen "
-                            "ejecutivo muy breve y directo (máximo 3 o 4 líneas) sobre el ataque actual. "
-                            "IMPORTANTE: Te daremos un 'Contexto de Correlación' que muestra si la IP ha atacado antes recientemente. "
-                            "Si hay historial previo, tu análisis DEBE explicar si estamos ante una campaña estructurada multi-vector o persistente. "
-                            "Sé directo, ve al grano sin introducciones ni saludos."
+                            "Eres un Analista de Ciberseguridad SOC Senior de SaktiShield. Tu tarea es generar un reporte "
+                            "forense altamente descriptivo, analítico y profesional (máximo 4 líneas). "
+                            "Debes detallar qué busca el atacante con este vector técnico y evaluar la gravedad considerando el historial provisto. "
+                            "Sé directo, técnico y preciso, sin introducciones corporativas ni saludos."
                         )
                     },
                     {
                         "role": "user",
-                        "content": f"Log Actual: {log_decoded} | Vector Actual: {categoria_detectada} | Contexto de Correlación: {contexto_correlacion}"
+                        "content": f"Log de Evento: {log_decoded} | Vector Detectado: {categoria_detectada} | Contexto de Correlación: {contexto_correlacion}"
                     }
                 ],
                 options={
-                    "temperature": 0.2,
+                    "temperature": 0.3,
                     "top_p": 0.8,
-                    "num_predict": 180
+                    "num_predict": 200
                 }
             )
             motivo_ia = response['message']['content'].strip().replace("'", '"')
         except Exception as e:
-            motivo_ia = f"Detección de firma coincidente con {categoria_detectada}."
+            motivo_ia = f"Análisis Automático: Actividad anómala confirmada para la firma {categoria_detectada}."
     else:
-        motivo_ia = "Solicitud web rutinaria y segura analizada por el núcleo analítico de SaktiShield. No se encontraron anomalías estructurales ni firmas de inyección de código. Tráfico aprobado."
+        motivo_ia = "Tráfico rutinario aprobado. No se detectaron anomalías estructurales ni firmas de inyección de código."
 
-    analysis_text = f"Categoría: {categoria_detectada} | Riesgo: {nivel_riesgo} | Análisis Forense: {motivo_ia}"
+    # 🟢 LIMPIEZA: Guardamos únicamente el reporte puro de la IA sin metadatos redundantes
+    analysis_text = motivo_ia
 
     # 4. APLICACIÓN DE POLÍTICAS EN EL FIREWALL & INTEGRACIÓN SOAR
     accion_tomada = SaktiSOAR.ejecutar_playbook(
@@ -228,9 +214,10 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
     if decision == "BLOQUEAR":
         status = "BLOQUEADO"
         simulate_firewall_block(client_ip, f"Firma detectada: {categoria_detectada}")
-        
         if nivel_riesgo in ["ALTO", "CRÍTICO"]:
             send_telegram_alert(categoria_detectada, nivel_riesgo, client_ip)
+    elif decision == "EVALUAR" and status != "BLOQUEADO":
+        status = "REVISIÓN"
     else:
         status = "PERMITIDO"
 

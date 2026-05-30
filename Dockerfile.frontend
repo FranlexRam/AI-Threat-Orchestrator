@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 4. Copiamos el archivo de la interfaz de usuario y la base de datos para lectura
 COPY app_saas.py .
+COPY logo_sakti.png .
 COPY security_vault.db .
 
 # 5. Exponemos el puerto 8501 que usa Streamlit por defecto

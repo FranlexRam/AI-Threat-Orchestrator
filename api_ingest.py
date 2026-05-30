@@ -81,9 +81,13 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         
         # 🛡️ FILTRO AUTOLIMPIANTE EN RAM
         log_decoded = urllib.parse.unquote(log_crudo).replace('+', ' ').upper()
+        
+        # 🟢 MODIFICACIÓN AQUÍ: Añadimos los disparadores para SSRF y Fuerza Bruta
         patrones_peligro = [
             "<SCRIPT", "SCRIPT>", "ALERT(", "UNION", "SELECT", 
-            "../", "..\\", "/ETC/PASSWD", "WHOAMI", "LOCALHOST", "127.0.0.1"
+            "../", "..\\", "/ETC/PASSWD", "WHOAMI", "LOCALHOST", "127.0.0.1",
+            "169.254.169.254", "METADATA",  # 📡 Disparadores para detectar SSRF
+            "FAILED LOGIN", "INVALID CREDENTIALS", "FAILED"  # 🔑 Disparadores para detectar Fuerza Bruta
         ]
         
         requiere_ia = any(patron in log_decoded for patron in patrones_peligro)
@@ -99,12 +103,17 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
                 }
             )
             
-        # 🧠 ESCALABILIDAD SOC
+# 🧠 ESCALABILIDAD SOC
         print(f"[🚀 API PIPELINE]: Alerta perimetral activada para {empresa_cliente} (IP {ip_cliente}). Escalando...")
         resultado_brain = orchestrator_ai(log_crudo, client_ip=ip_cliente)
         
-        partes = resultado_brain.split(" - ")
-        status_final = partes[0]
+        # 🛡️ CONTROL DE PROTECCIÓN: Validamos que contenga el separador para evitar caídas
+        if " - " in resultado_brain:
+            partes = resultado_brain.split(" - ")
+            status_final = partes[0]
+        else:
+            # Si el core responde directo o es un bloqueo por volumen, lo catalogamos por defecto como BLOQUEADO / CRÍTICO
+            status_final = "BLOQUEADO"
         
         alerta_dashboard = {
             "ip": ip_cliente,
