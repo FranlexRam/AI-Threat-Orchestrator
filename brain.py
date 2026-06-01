@@ -139,7 +139,7 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
 
     elif re.search(r"(LOCALHOST|127\.0\.0\.1|169\.254\.169\.254)", log_upper) and \
          any(k in log_upper for k in ["URL=", "URI=", "PATH=", "DEST=", "REDIRECT="]):
-        categoria_detectada = "SSRF Attack"
+        categoria_detectada = "SSRF Attack (Server-Side Request Forgery)"
         nivel_riesgo = "ALTO"
         decision = "BLOQUEAR"    
 
@@ -216,7 +216,7 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50"):
         simulate_firewall_block(client_ip, f"Firma detectada: {categoria_detectada}")
         if nivel_riesgo in ["ALTO", "CRÍTICO"]:
             send_telegram_alert(categoria_detectada, nivel_riesgo, client_ip)
-    elif decision == "EVALUAR" and status != "BLOQUEADO":
+    elif decision == "EVALUAR":
         status = "REVISIÓN"
     else:
         status = "PERMITIDO"
