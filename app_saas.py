@@ -3,112 +3,138 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import os
-import time  # 🚀 Importamos time para controlar el ciclo de vida
+import time  # 🚀 Control del ciclo de vida
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="SaktiShield Analytics", page_icon="🛡️", layout="wide")
+# --- CONFIGURACIÓN DE LA PÁGINA RESPONSIVE ---
+st.set_page_config(
+    page_title="SaktiShield AI Threat Orchestrator", 
+    page_icon="🛡️", 
+    layout="wide", 
+    initial_sidebar_state="collapsed"
+)
 
-# --- ESTILOS CSS PERSONALIZADOS (LOOK PREMIUM EXPERTO - ELEMENTOS OLED) ---
-st.markdown("""
+# --- 🌓 SISTEMA DE CONTROL DE TEMA (MODO CLARO / OSCURO) ---
+if "tema_claro" not in st.session_state:
+    st.session_state.tema_claro = False
+
+# Fila superior minimalista para el switch de tema
+col_header_left, col_header_right = st.columns([8, 2])
+with col_header_right:
+    mode_toggle = st.toggle("☀️ Modo Claro", value=st.session_state.tema_claro)
+    st.session_state.tema_claro = mode_toggle
+
+# --- INYECCIÓN DINÁMICA DE CSS CORREGIDA Y OPTIMIZADA ---
+if st.session_state.tema_claro:
+    # ☀️ MODO CLARO ENTERPRISE
+    bg_app = "#F4F4F5"
+    bg_card = "#FFFFFF"
+    border_color = "#E4E4E7"
+    text_main = "#18181B"
+    text_muted = "#52525B"  
+    plotly_text = "#18181B"
+    code_bg = "#E4E4E7"
+    badge_medio = "#18181B"
+else:
+    # 🌙 MODO OSCURO OLED
+    bg_app = "#080809"
+    bg_card = "#101012"
+    border_color = "#1F1F23"
+    text_main = "#FFFFFF"
+    text_muted = "#A1A1AA"
+    plotly_text = "#FFFFFF"
+    code_bg = "#18181B"
+    badge_medio = "#FFFFFF"
+
+st.markdown(f"""
     <style>
-    /* Fondo general oscuro táctico */
-    .main { background-color: #0B0D13; }
+    .stApp {{ background-color: {bg_app} !important; color: {text_main} !important; }}
+    .main {{ background-color: {bg_app} !important; }}
+    hr {{ border-top: 1px solid #FF0033 !important; opacity: 0.3; }}
+
+    /* Selector de Streamlit Adaptable */
+    div[data-baseweb="select"] {{
+        background-color: {bg_card} !important;
+        color: {text_main} !important;
+    }}
     
-    /* Estilización de métricas */
-    div[data-testid="stMetricValue"] { font-size: 38px; font-weight: 700; color: #00E575; }
-    div[data-testid="stMetricLabel"] { font-size: 14px; color: #AEB0B7; letter-spacing: 0.5px; }
-    
-    /* Estilos de la tabla SOC Nativa HTML */
-    .tabla-soc-container {
+    /* Tabla SOC HTML Adaptable */
+    .tabla-soc-container {{
         max-height: 410px; 
         overflow-y: auto; 
-        border: 1px solid #1E2538; 
-        border-radius: 8px;
-        background-color: #121622;
-    }
-    .tabla-soc {
+        border: 1px solid {border_color}; 
+        border-radius: 6px;
+        background-color: {bg_card};
+    }}
+    .tabla-soc {{
         width: 100%; 
         border-collapse: collapse; 
         font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
-        color: #FFFFFF; 
+        color: {text_main}; 
         text-align: left;
-    }
-    .tabla-soc thead tr {
-        background-color: #1A1F30; 
-        border-bottom: 2px solid #1E2538; 
+    }}
+    .tabla-soc thead tr {{
+        background-color: {"#E4E4E7" if st.session_state.tema_claro else "#18181B"}; 
+        border-bottom: 2px solid {border_color}; 
         position: sticky; 
         top: 0; 
         z-index: 10;
-    }
-    .tabla-soc th {
+    }}
+    .tabla-soc th {{
         padding: 14px; 
-        font-size: 16px; 
+        font-size: 13px; 
         font-weight: 700; 
-        color: #AEB0B7;
-    }
-    .tabla-soc tbody tr {
-        border-bottom: 1px solid #1E2538; 
-        font-size: 17px; 
-    }
-    .tabla-soc td {
-        padding: 14px; 
-        color: #F3F4F6;
-    }
-    /* Estilos dinámicos para las etiquetas de severidad */
-    .badge-critico { color: #FF003C; font-weight: 700; }
-    .badge-medio { color: #FFB300; font-weight: 700; }
-    .badge-bajo { color: #00E575; font-weight: 700; }
+        color: {text_muted};
+        text-transform: uppercase;
+    }}
+    .tabla-soc tbody tr {{ border-bottom: 1px solid {border_color}; font-size: 15px; }}
+    .tabla-soc tbody tr:hover {{ background-color: {"#FAFAFA" if st.session_state.tema_claro else "#141416"}; }}
+    .tabla-soc td {{ padding: 14px; color: {text_main}; }}
     
-    /* Contenedor de la Tarjeta Forense */
-    .forensic-card {
-        background-color: #121622;
-        border-left: 6px solid #9C27B0; 
+    /* Badges de Severidad */
+    .badge-critico {{ color: #FF0033; font-weight: 700; }}
+    .badge-medio {{ color: {badge_medio}; font-weight: 700; opacity: 0.8; }}
+    .badge-bajo {{ color: {text_muted}; font-weight: 500; }}
+    
+    /* Tarjeta Forense */
+    .forensic-card {{
+        background-color: {bg_card};
+        border-left: 6px solid #FF0033; 
         padding: 35px;
-        border-radius: 10px;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.4);
-        margin-top: 20px;
-    }
-    .forensic-header {
-        font-size: 24px;
-        font-weight: 700;
-        color: #FFFFFF;
-        margin-bottom: 20px;
-        letter-spacing: 0.5px;
-    }
-    .forensic-text {
-        font-size: 17px;
-        color: #F3F4F6;
-        line-height: 1.6;
-        text-align: justify;
-    }
-    .forensic-text code {
-        background-color: #1E2538;
-        color: #00E575;
-        padding: 3px 8px;
+        border-radius: 6px;
+        border-top: 1px solid {border_color};
+        border-right: 1px solid {border_color};
+        border-bottom: 1px solid {border_color};
+        margin-top: 25px;
+    }}
+    .forensic-header {{ font-size: 24px; font-weight: 800; color: {text_main}; margin-bottom: 20px; }}
+    .forensic-text {{ font-size: 17px; color: {text_main}; line-height: 1.7; }}
+    .forensic-text code {{
+        background-color: {code_bg};
+        color: #FF0033; 
+        padding: 4px 8px;
         border-radius: 4px;
-        font-size: 16px;
-    }
+        font-size: 15px;
+        font-family: monospace;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- CABECERA BRANDING (LOGO Y TÍTULO) ---
-col_logo, col_titulo = st.columns([1, 8])
+# --- CABECERA BRANDING ---
+with col_header_left:
+    col_logo, col_titulo = st.columns([1, 11])
+    with col_logo:
+        logo_path = "logo_sakti.png"
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=80)
+        else:
+            st.title("🛡️")
+    with col_titulo:
+        st.markdown(f"<h1 style='margin-bottom: 0px; font-weight: 800; color:{text_main};'>SaktiShield AI Threat Orchestrator</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color: {text_muted}; font-size: 15px; margin-top: 5px;'>Dashboard de Control Ejecutivo e Interfaz de Auditoría Forense en Tiempo Real.</p>", unsafe_allow_html=True)
 
-with col_logo:
-    logo_path = "logo_sakti.png"
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=95)
-    else:
-        st.title("🛡️")
-
-with col_titulo:
-    st.markdown("<h1 style='margin-bottom: 0px; font-weight: 700;'>SaktiShield AI Threat Orchestrator</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #AEB0B7; font-size: 15px; margin-top: 5px;'>Dashboard de Control Ejecutivo e Interfaz de Auditoría Forense en Tiempo Real.</p>", unsafe_allow_html=True)
-
-# --- FUNCIÓN PARA LEER LA DB CON FILTRO SOC ---
+# --- FUNCIÓN PARA LEER LA DB ---
 def cargar_datos():
     conn = sqlite3.connect('security_vault.db')
-    # 🟢 FILTRO DE AUDITORÍA: Excluimos el tráfico legítimo directo desde el query SQL
     query = """
         SELECT id, fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion 
         FROM incidentes 
@@ -117,132 +143,153 @@ def cargar_datos():
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
+    
+    if not df.empty:
+        df['categoria'] = df['categoria'].replace({
+            'SSRF Attack (Server-Side Request Forgery)': 'SSRF Attack'
+        })
     return df
-
-# 📡 MECANISMO DE CONTROL TEMPORAL EN CALIENTE
-if "ultimo_conteo" not in st.session_state:
-    st.session_state.ultimo_conteo = 0
 
 try:
     df = cargar_datos()
-    conteo_actual = len(df)
+    
+    # --- CÁLCULO DE MÉTRICAS VALORES ---
+    total_incidentes = len(df)
+    amenazas_criticas = len(df[df["nivel_riesgo"].str.upper().isin(["CRÍTICO", "CRITICO", "ALTO"])]) if not df.empty else 0
+    ips_bloqueadas = df["ip_origen"].nunique() if not df.empty else 0
 
-    if conteo_actual != st.session_state.ultimo_conteo:
-        st.session_state.ultimo_conteo = conteo_actual
-
-    # --- MÉTRICAS PRINCIPALES ---
-    st.markdown("---")
+    # --- TARJETAS DE MÉTRICAS HTML ---
+    st.markdown("<br>", unsafe_allow_html=True)
     m1, m2, m3 = st.columns(3)
+    
     with m1:
-        st.metric("Total Incidentes", len(df))
+        st.markdown(f"""
+            <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Total Incidentes</div>
+                <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{total_incidentes}</div>
+            </div>
+        """, unsafe_allow_html=True)
+        
     with m2:
-        amenazas_criticas = len(df[df["nivel_riesgo"].str.upper().isin(["CRÍTICO", "CRITICO", "ALTO"])])
-        st.metric("Amenazas Críticas Mitigadas", amenazas_criticas)
+        st.markdown(f"""
+            <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Amenazas Críticas Mitigadas</div>
+                <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{amenazas_criticas}</div>
+            </div>
+        """, unsafe_allow_html=True)
+        
     with m3:
-        st.metric("IPs Únicas Bloqueadas", df["ip_origen"].nunique())
+        st.markdown(f"""
+            <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">IPs Únicas Bloqueadas</div>
+                <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{ips_bloqueadas}</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- CONFIGURACIÓN DE COLORES DINÁMICOS (ESPACIO PARA BRUTE FORCE) ---
+    # --- 🟨 MAPA DE COLORES PREMIUM (Directory Traversal forzado a Amarillo en ambos temas) ---
     color_map = {
-        "SQL Injection": "#FF003C",
-        "XSS (Cross-Site Scripting)": "#FF5722",
-        "Directory Traversal": "#FFB300",
-        "Brute Force": "#FF9800",  # 🔑 Color OLED naranja para destacar los ataques de fuerza bruta
-        "Remote Code Execution (RCE)": "#9C27B0",
-        "SSRF Attack": "#00BCD4",
-        "Otras Amenazas": "#7C4DFF"
+        "Brute Force": "#FF0033",
+        "SQL Injection": "#80001A",
+        "XSS (Cross-Site Scripting)": "#0066FF",
+        "Directory Traversal": "#EAB308",  # Amarillo Cyber permanente para mayor impacto visual
+        "Remote Code Execution (RCE)": "#FF6600",
+        "SSRF Attack": "#71717A",
+        "Otras Amenazas": "#444444"
     }
 
-    # --- CONTROL DE VISTA VACÍA (Por si acabas de borrar la DB) ---
     if df.empty:
-        st.info("📡 Monitoreo SOC activo: Esperando que ingresen eventos o ataques perimetrales a la API...")
+        st.info("📡 Monitoreo SOC activo: Esperando que ingresen eventos...")
     else:
-        # --- GRÁFICOS INTERACTIVOS ---
-        c1, c2 = st.columns([4, 5])
+        # --- COLUMNAS RESPONSIVE OPTIMIZADAS ---
+        c1, c2 = st.columns([1, 1.2])
 
         with c1:
-            st.subheader("📊 Distribución de Amenazas")
+            st.markdown(f"<h3 style='color:{text_main}; font-weight:700;'>📊 Distribución de Amenazas</h3>", unsafe_allow_html=True)
             fig_cat = px.pie(
                 df, 
                 names="categoria", 
-                hole=0.55, 
+                hole=0.6, 
                 color="categoria",
                 color_discrete_map=color_map
             )
+            
+            # LEYENDA HORIZONTAL COMPACTA INFERIOR
             fig_cat.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#FFFFFF', size=12),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
+                font=dict(color=plotly_text, size=12),
+                legend=dict(
+                    orientation="h",        
+                    yanchor="top", 
+                    y=-0.08,                
+                    xanchor="center", 
+                    x=0.5,
+                    font=dict(color=plotly_text, size=11)
+                ),
                 margin=dict(t=10, b=10, l=10, r=10)
             )
-            st.plotly_chart(fig_cat, theme="streamlit", selection_mode="points")
+            fig_cat.update_traces(
+                textposition='inside', 
+                textinfo='percent', 
+                marker=dict(line=dict(color=bg_app, width=2))
+            )
+            st.plotly_chart(fig_cat, theme="streamlit", use_container_width=True)
 
         with c2:
-            st.subheader("📋 Historial de Eventos Recientes")
+            st.markdown(f"<h3 style='color:{text_main}; font-weight:700;'>📋 Historial de Eventos Recientes</h3>", unsafe_allow_html=True)
             
             df_vista = df[["fecha", "ip_origen", "categoria", "nivel_riesgo", "accion_mitigacion"]].copy()
             
             def parsear_fila_html(row):
                 sev = str(row["nivel_riesgo"]).upper()
-                if "CRÍTICO" in sev or "CRITICO" in sev or "ALTO" in sev:
-                    clase = "badge-critico"
-                elif "MEDIO" in sev:
-                    clase = "badge-medio"
-                else:
-                    clase = "badge-bajo"
+                clase = "badge-critico" if any(x in sev for x in ["CRÍT", "CRIT", "ALT"]) else ("badge-medio" if "MED" in sev else "badge-bajo")
                 
                 row["nivel_riesgo"] = f'<span class="{clase}">{row["nivel_riesgo"]}</span>'
-                row["ip_origen"] = f'<code style="color: #F3F4F6; font-family: monospace;">{row["ip_origen"]}</code>'
-                row["accion_mitigacion"] = f'<span style="color: #AEB0B7; font-style: italic;">{row["accion_mitigacion"]}</span>'
+                row["ip_origen"] = f'<code style="color: #FF0033; font-family: monospace; background:{code_bg}; padding:2px 6px; border-radius:4px;">{row["ip_origen"]}</code>'
+                row["accion_mitigacion"] = f'<span style="color: {text_muted}; font-style: italic;">{row["accion_mitigacion"]}</span>'
                 return row
 
             df_vista = df_vista.apply(parsear_fila_html, axis=1)
             df_vista.columns = ["Fecha y Hora", "Dirección IP", "Vector de Ataque", "Severidad", "Acción Defensiva (SOAR)"]
             
             html_puro = df_vista.to_html(index=False, escape=False, classes="tabla-soc")
-            html_final = f'<div class="tabla-soc-container">{html_puro}</div>'
-            st.markdown(html_final, unsafe_allow_html=True)
+            st.markdown(f'<div class="tabla-soc-container">{html_puro}</div>', unsafe_allow_html=True)
 
-        # --- MOTOR DE SELECCIÓN DINÁMICA DE REPORTES ---
-        st.markdown("---")
-        st.subheader("🔍 Visor Interactivo de Auditoría SOC")
+        # --- VISOR INTERACTIVO ---
+        st.markdown("<br><hr>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='color:{text_main}; font-weight:700;'>🔍 Visor Interactivo de Auditoría SOC</h3>", unsafe_allow_html=True)
         
         df['selector_texto'] = df['fecha'] + " | " + df['categoria'] + " (" + df['ip_origen'] + ")"
         opciones_incidentes = df['selector_texto'].tolist()
         
         incidente_seleccionado = st.selectbox(
-            "Selecciona un incidente del historial para inspeccionar los detalles del reporte:",
+            "Selecciona un incidente del historial para inspeccionar:",
             options=opciones_incidentes,
             index=0 
         )
         
         fila_seleccionada = df[df['selector_texto'] == incidente_seleccionado].iloc[0]
         
-        log_original_sel = fila_seleccionada["log_original"]
-        cuerpo_reporte = fila_seleccionada["analisis_ia"] # 🟢 DIRECTO: Muestra el reporte limpio generado por Ollama
-        categoria_sel = fila_seleccionada["categoria"]
-        riesgo_sel = fila_seleccionada["nivel_riesgo"]
-        ip_sel = fila_seleccionada["ip_origen"]
-        fecha_sel = fila_seleccionada["fecha"]
-        mitigacion_sel = fila_seleccionada["accion_mitigacion"]
-
         st.markdown(f"""
-            <div class="forensic-card" style="border-left: 6px solid {color_map.get(categoria_sel, '#7C4DFF')};">
+            <div class="forensic-card" style="border-left: 6px solid {color_map.get(fila_seleccionada['categoria'], '#FF0033')};">
                 <div class="forensic-header">
-                    🛡️ REPORTE DE AUDITORÍA: {categoria_sel.upper()}
+                    🛡️ REPORTE DE AUDITORÍA: {fila_seleccionada['categoria'].upper()}
                 </div>
                 <div class="forensic-text">
-                    <b>Fecha del Evento:</b> {fecha_sel} | <b>IP Origen:</b> {ip_sel} | <b>Riesgo:</b> {riesgo_sel}<br>
-                    <b>Mitigación Ejecutada:</b> <span style="color: #00E575; font-weight: 600;">{mitigacion_sel}</span><br>
-                    <b>Payload Detectado:</b> <code>{log_original_sel}</code><br><br>
-                    <b>Análisis del Analista Virtual:</b> {cuerpo_reporte}
+                    <b>Fecha del Evento:</b> {fila_seleccionada['fecha']} &nbsp;|&nbsp; <b>IP Origen:</b> <code>{fila_seleccionada['ip_origen']}</code> &nbsp;|&nbsp; <b>Riesgo:</b> {fila_seleccionada['nivel_riesgo']}<br>
+                    <b>Mitigación Ejecutada:</b> <span style="font-weight: 700;">{fila_seleccionada['accion_mitigacion']}</span><br>
+                    <b>Payload Detectado:</b> <code>{fila_seleccionada['log_original']}</code><br><br>
+                    <div style="margin-top:15px; border-top:1px solid {border_color}; padding-top:15px;">
+                        <b>Análisis Forense Virtual:</b><br>
+                        <span style="color: {text_main}; font-size:18px;">{fila_seleccionada['analisis_ia']}</span>
+                    </div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-    # 📡 INTERVALO DE AUTOMATIZACIÓN EN SEGUNDOS
+    # 📡 Sincronización en caliente
     time.sleep(2)
     st.rerun()
 
