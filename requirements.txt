@@ -1,3 +1,4 @@
+#Dependencias de Python
 fastapi
 uvicorn
 pydantic
@@ -6,3 +7,4 @@ requests
 ollama
 python-dotenv
 plotly
+psycopg2-binary==2.9.9

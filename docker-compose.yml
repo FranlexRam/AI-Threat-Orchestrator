@@ -18,6 +18,8 @@ services:
     volumes:
       - ./security_vault.db:/app/security_vault.db  # Compartimos la DB local para que no se borren los datos al apagar el contenedor
       - ./blacklist.txt:/app/blacklist.txt
+    depends_on:
+      - saktishield-db  # 🐘 Forzamos a que la base de datos levante antes que el backend
 
   # 📊 Contenedor del Dashboard OLED
   saktishield-frontend:
@@ -33,3 +35,21 @@ services:
     volumes:
       - ./security_vault.db:/app/security_vault.db
       - ./logo_sakti.png:/app/logo_sakti.png
+
+  # 🐘 NUEVO: MOTOR DE BASE DE DATOS CORPORATIVO (PostgreSQL)
+  saktishield-db:
+    image: postgres:15-alpine
+    container_name: threat_orchestrator-saktishield-db-1
+    restart: always
+    environment:
+      POSTGRES_USER: sakti_admin
+      POSTGRES_PASSWORD: SaktiSecurePassword2026!  # Clave corporativa de administración
+      POSTGRES_DB: saktishield_production
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_corporate_data:/var/lib/postgresql/data
+
+# 💾 VOLÚMENES GLOBALES PERSISTENTES
+volumes:
+  postgres_corporate_data:  # Garantiza que la data corporativa de Postgres no se borre al apagar Docker
