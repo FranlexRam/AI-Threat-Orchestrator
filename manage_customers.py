@@ -2,11 +2,26 @@
 import sqlite3
 import os
 import secrets
+import psycopg2
 
 DB_PATH = "security_vault.db"
 
+# 🐘 CONFIGURACIÓN COPIADA DE TU DOCKER-COMPOSE
+# Como corres el script desde la Mac, "localhost" se conectará al puerto 5432 expuesto por Docker
+PG_CONFIG = {
+    "dbname": "saktishield_production",
+    "user": "sakti_admin",
+    "password": "SaktiSecurePassword2026!",
+    "host": "localhost",
+    "port": "5432"
+}
+
 def conectar_db():
     return sqlite3.connect(DB_PATH)
+
+def conectar_postgres():
+    """Establece conexión con el clúster relacional de PostgreSQL"""
+    return psycopg2.connect(**PG_CONFIG)
 
 def listar_clientes():
     conn = conectar_db()
@@ -39,24 +54,55 @@ def agregar_cliente():
         print("❌ El nombre de la empresa no puede estar vacío.")
         return
         
-    # Generamos un token criptográfico seguro de 24 bytes en hex (48 caracteres) con tu prefijo
+    # Pedir credenciales administrativas para el Dashboard Web
+    print(f"\n--- 🌐 Configuración de Acceso Web para {nombre_empresa} ---")
+    username_web = input("👤 Define el usuario administrador para la plataforma: ").strip()
+    password_web = input("🔑 Define la contraseña para este usuario: ").strip()
+    
+    if not username_web or not password_web:
+        print("❌ El usuario y la contraseña no pueden estar vacíos.")
+        return
+
+    # Generamos el token criptográfico con tu formato
     token_seguro = f"sakti_live_{secrets.token_hex(24)}"
     
-    conn = conectar_db()
-    cursor = conn.cursor()
+    # Abrimos la conexión local de SQLite
+    conn_sqlite = conectar_db()
+    cursor_sqlite = conn_sqlite.cursor()
+    
     try:
-        cursor.execute(
+        # 1. Inserción en SQLite (Perímetro / API Ingest)
+        cursor_sqlite.execute(
             "INSERT INTO sakti_customers (empresa_name, api_key, estatus) VALUES (?, ?, 'ACTIVO');",
             (nombre_empresa, token_seguro)
         )
-        conn.commit()
-        print(f"\n✅ ¡Cliente agregado con éxito!")
+        
+        # 2. Inserción en PostgreSQL (Aplicación / Dashboard SaaS)
+        conn_pg = conectar_postgres()
+        cursor_pg = conn_pg.cursor()
+        
+        cursor_pg.execute("""
+            INSERT INTO sakti_users (username, password, rol, empresa_name)
+            VALUES (%s, %s, 'CLIENT_ADMIN', %s);
+        """, (username_web, password_web, nombre_empresa))
+        
+        # Si ambas bases de datos responden bien, guardamos cambios
+        conn_sqlite.commit()
+        conn_pg.commit()
+        
+        print(f"\n✅ ¡Ecosistema sincronizado con éxito!")
         print(f"🏢 Empresa: {nombre_empresa}")
-        print(f"🔑 Token Asignado: {token_seguro}")
+        print(f"🔑 Token Ingesta: {token_seguro}")
+        print(f"👤 Acceso Web Dashboard: {username_web} / {password_web}")
+        
+        cursor_pg.close()
+        conn_pg.close()
+        
     except Exception as e:
-        print(f"❌ Error al insertar el cliente: {e}")
+        print(f"❌ Error crítico en la sincronización Multi-tenant: {e}")
+        conn_sqlite.rollback()
     finally:
-        conn.close()
+        conn_sqlite.close()
 
 def eliminar_cliente():
     listar_clientes()
@@ -67,29 +113,40 @@ def eliminar_cliente():
         
     id_cliente = int(id_input)
     
-    conn = conectar_db()
-    cursor = conn.cursor()
+    conn_sqlite = conectar_db()
+    cursor_sqlite = conn_sqlite.cursor()
     try:
-        # Verificamos si existe antes de borrar
-        cursor.execute("SELECT empresa_name FROM sakti_customers WHERE id = ?;", (id_cliente,))
-        cliente = cursor.fetchone()
+        cursor_sqlite.execute("SELECT empresa_name FROM sakti_customers WHERE id = ?;", (id_cliente,))
+        cliente = cursor_sqlite.fetchone()
         
         if not cliente:
             print(f"❌ No se encontró ningún cliente con el ID {id_cliente}.")
             return
             
-        confirmacion = input(f"⚠️ ¿Estás seguro de que quieres eliminar a '{cliente[0]}'? (s/n): ").strip().lower()
+        confirmacion = input(f"⚠️ ¿Estás seguro de que quieres eliminar a '{cliente[0]}'? Esto también borrará su acceso web (s/n): ").strip().lower()
         if confirmacion == 's':
-            cursor.execute("DELETE FROM sakti_customers WHERE id = ?;", (id_cliente,))
-            conn.commit()
-            print(f"🗑️ Cliente '{cliente[0]}' eliminado correctamente del sistema.")
+            # Eliminar de SQLite
+            cursor_sqlite.execute("DELETE FROM sakti_customers WHERE id = ?;", (id_cliente,))
+            
+            # Eliminar de PostgreSQL de manera automática
+            conn_pg = conectar_postgres()
+            cursor_pg = conn_pg.cursor()
+            cursor_pg.execute("DELETE FROM sakti_users WHERE empresa_name = %s;", (cliente[0],))
+            
+            conn_sqlite.commit()
+            conn_pg.commit()
+            
+            print(f"🗑️ Cliente '{cliente[0]}' y sus credenciales web fueron removidos del sistema.")
+            cursor_pg.close()
+            conn_pg.close()
         else:
             print("❌ Operación de borrado cancelada.")
             
     except Exception as e:
         print(f"❌ Error al eliminar el cliente: {e}")
+        conn_sqlite.rollback()
     finally:
-        conn.close()
+        conn_sqlite.close()
 
 def menu():
     if not os.path.exists(DB_PATH):
@@ -99,7 +156,7 @@ def menu():
     while True:
         print("📁 GESTOR DE PLATAFORMA SAKTISHIELD")
         print("1. Ver lista de clientes organizada")
-        print("2. Registrar un nuevo cliente (Generar Token)")
+        print("2. Registrar un nuevo cliente (Generar Token y Acceso Web)")
         print("3. Eliminar un cliente por ID")
         print("4. Salir")
         

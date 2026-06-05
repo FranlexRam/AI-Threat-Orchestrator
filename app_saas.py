@@ -61,14 +61,6 @@ def inicializar_base_datos():
                 VALUES ('sakti_root', 'sakti123', 'SUPERADMIN', 'GLOBAL');
             """)
             
-        # Sembrar la cuenta administrativa para tu cliente Empresa Alfa C.A.
-        cursor.execute("SELECT id FROM sakti_users WHERE username = 'alfa_admin';")
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO sakti_users (username, password, rol, empresa_name)
-                VALUES ('alfa_admin', 'alfa123', 'CLIENT_ADMIN', 'Empresa Alfa C.A.');
-            """)
-            
         conn.commit()
         cursor.close()
         conn.close()

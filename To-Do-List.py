@@ -25,7 +25,11 @@ Punto 3: Alta Disponibilidad y Concurrencia (Migración Corporativa)
 [ ] Paso 4: Notificación y Respaldo por Email (SMTP/SendGrid).
 🛡️ FASE 4: Blindaje de Red Perimetral (Despliegue en la Vida Real)
 [ ] Configurar un servidor Nginx como Reverse Proxy con SSL (HTTPS).
-[ ] Implementar reglas de Rate Limiting perimetral (Cloudflare o AWS WAF)."""
+[ ] Implementar reglas de Rate Limiting perimetral (Cloudflare o AWS WAF).
+🔮 BACKLOG / FASE 3: Endurecimiento y Autoservicio
+[ ] Crear módulo de Autogestión de Credenciales (Cambio de contraseña desde el perfil).
+[ ] Implementar cifrado/hashing (Bcrypt) en la tabla 'sakti_users'.
+[ ] Diseñar la consola de registro automatizado de clientes para el SUPERADMIN."""
 
 # Nombre del archivo de destino
 file_name = "TODO_LIST.txt"
