@@ -28,15 +28,24 @@ services:
       dockerfile: Dockerfile.frontend
     ports:
       - "8501:8501"
+    # 🟢 NUEVO: Inyectamos variables para que Streamlit sepa dónde está PostgreSQL en Docker
+    environment:
+      - DB_HOST=saktishield-db
+      - DB_NAME=saktishield_production
+      - DB_USER=sakti_admin
+      - DB_PASSWORD=SaktiSecurePassword2026!
+      - DB_PORT=5432
     env_file:
       - .env
     depends_on:
+      - saktishield-db
       - saktishield-backend
     volumes:
+      - ./app_saas.py:/app/app_saas.py
       - ./security_vault.db:/app/security_vault.db
       - ./logo_sakti.png:/app/logo_sakti.png
 
-  # 🐘 NUEVO: MOTOR DE BASE DE DATOS CORPORATIVO (PostgreSQL)
+  # 🐘 MOTOR DE BASE DE DATOS CORPORATIVO (PostgreSQL)
   saktishield-db:
     image: postgres:15-alpine
     container_name: threat_orchestrator-saktishield-db-1

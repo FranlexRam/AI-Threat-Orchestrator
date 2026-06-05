@@ -19,3 +19,53 @@ Punto 3: Alta Disponibilidad y Concurrencia (Migración Corporativa)
 🛡️ FASE 4: Blindaje de Red Perimetral (Despliegue en la Vida Real)
 [ ] Configurar un servidor Nginx como Reverse Proxy con SSL (HTTPS).
 [ ] Implementar reglas de Rate Limiting perimetral (Cloudflare o AWS WAF).
+
+
+
+Quiero que hagamos esto:
+
+Para construir esa separación de accesos de manera robusta y profesional en tu plataforma, la estrategia estándar de la industria se basa en dos pilares: un Esquema de Roles (Control de Acceso Basado en Roles o RBAC) y un Filtro de Inquilino (Tenant Isolation) en tus consultas SQL.
+
+Aquí tienes el mapa de cómo lo vamos a estructurar a nivel de base de datos y lógica en el Dashboard:
+
+1. La Arquitectura en la Base de Datos (PostgreSQL)
+Para que el sistema sepa quién es quién, mañana cuando adaptemos el entorno agregaremos una tabla de Usuarios conectada a tus clientes. La estructura lógica se vería así:
+
+Rol SUPERADMIN (Tú / SAKTI Core): Tu usuario no está amarrado a ninguna empresa en particular (su campo empresa_id o empresa_name es NULL o GLOBAL). Tiene permiso de ver absolutamente todo.
+
+Rol CLIENT_ADMIN (Tú cliente - Empresa Alfa C.A.): El usuario de tu cliente está estrictamente amarrado a su registro de empresa. Tiene prohibido ver registros cuyo origen sea distinto al suyo.
+
+2. ¿Cómo se construye la lógica en el Dashboard (app_saas.py)?
+En tu Dashboard de Streamlit, la magia ocurre en dos fases: el Login y la Consulta Dinámica.
+
+Fase A: El Sistema de Autenticación (Login)
+Cuando alguien entra al Dashboard (localhost:8501), lo primero que verá es una pantalla limpia de inicio de sesión que le pide su Usuario y Contraseña. Al presionar "Ingresar", Streamlit valida los datos en Postgres y guarda dos variables cruciales en la memoria de la sesión (st.session_state):
+
+El Rol del usuario (SUPERADMIN o CLIENT_ADMIN).
+
+El Nombre de la Empresa asociado a ese usuario.
+
+Fase B: Consultas Inyectadas Dinámicamente (Filtro Tenant)
+En lugar de traer todos los incidentes con un comando genérico, modificamos la función que alimenta las gráficas y la dona de Plotly para que use condicionales basados en quién inició sesión.
+
+Mira lo limpio que queda el flujo lógico en código:
+
+Python
+# Lógica conceptual de aislamiento en el Dashboard
+user_rol = st.session_state["rol"]
+user_empresa = st.session_state["empresa_name"]
+
+if user_rol == "SUPERADMIN":
+    # 🌍 VISTA GLOBAL: Tú ves los ataques de todo el ecosistema juntos
+    query = "SELECT * FROM incidentes;"
+    st.title("🛡️ SaktiShield Global — Panel de Control General")
+
+elif user_rol == "CLIENT_ADMIN":
+    # 🔒 VISTA AISLADA: El cliente solo ve lo suyo. El motor de Postgres filtra en milisegundos.
+    query = "SELECT * FROM incidentes WHERE empresa_name = %s;"
+    params = (user_empresa,)
+    st.title(f"🛡️ SaktiShield — Monitoreo para {user_empresa}")
+3. ¿Cómo cambia la experiencia visual?
+Para tu Cliente (Empresa Alfa C.A.): Al loguearse, el Dashboard calculará las métricas (Incidentes Totales, IPs Bloqueadas) y pintará la dona de Plotly únicamente con los datos filtrados para su empresa. No sabrá ni tendrá forma de ver si tienes otros 100 clientes en la plataforma. Su entorno es 100% privado.
+
+Para ti (SuperAdmin): Al loguearse, verás el panel máster. Tu dona mostrará el acumulado de todos los ataques combinados del ecosistema. Además, te implementaremos un menú desplegable (Selectbox) en la barra lateral que dirá: "Seleccionar Cliente a Monitorear". Si seleccionas "Todos", ves la torta global; si seleccionas "Empresa Alfa", el dashboard muta en caliente y te muestra exactamente la misma vista restringida que está viendo tu cliente para que puedas auditarlo o darle soporte en tiempo real.

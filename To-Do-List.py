@@ -40,3 +40,7 @@ except Exception as e:
 
     #**Para ejecutarlo en la terminal:
     #**python To-Do-List.py
+
+
+    #Empezar a programar: docker-compose up -d 🟢
+    #Terminar por el día: docker-compose down 🔴
