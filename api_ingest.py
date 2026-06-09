@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import pydantic
 import json
 from brain import orchestrator_ai
+import sqlite3
 
 # Inicializamos la plataforma API SaaS
 app = FastAPI(
@@ -41,8 +42,8 @@ def obtener_conexion_db():
 
 def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
     """
-    🧠 FILTRO DINÁMICO: Busca y valida la credencial directamente 
-    en la Base de Datos PostgreSQL en tiempo real para verificar suscripciones.
+    🧠 FILTRO DINÁMICO PERIMETRAL: Busca y valida la credencial directamente 
+    en el Vault Local de SQLite (security_vault.db) compartido en tiempo real.
     """
     if not api_key:
         raise HTTPException(
@@ -50,14 +51,15 @@ def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
             detail="Acceso Denegado: X-Sakti-Token ausente en las cabeceras."
         )
     
-    # 🐘 CONEXIÓN EN CALIENTE A LA DB DE POSTGRES
+    # 🛡️ CONEXIÓN AL VAULT LOCAL DE SEGURIDAD (SQLite)
     try:
-        conn = obtener_conexion_db()
+        # Docker mapea este archivo en la raíz /app/security_vault.db
+        conn = sqlite3.connect("security_vault.db")
         cursor = conn.cursor()
         
-        # En PostgreSQL los marcadores de posición usan '%s' en vez de '?'
+        # En SQLite los marcadores usan '?' en vez de '%s'
         cursor.execute(
-            "SELECT empresa_name FROM sakti_customers WHERE api_key = %s AND estatus = 'ACTIVO'", 
+            "SELECT empresa_name FROM sakti_customers WHERE api_key = ? AND estatus = 'ACTIVO'", 
             (api_key,)
         )
         cliente = cursor.fetchone()
@@ -66,17 +68,17 @@ def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Fallo de enlace con el vault corporativo (Postgres): {str(e)}"
+            detail=f"Fallo de enlace con el vault local perimetral (SQLite): {str(e)}"
         )
     
     # Si la consulta no devuelve filas, el token es falso o fue revocado
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Acceso Denegado: X-Sakti-Token inválido o revocado de la firma."
+            detail="Acceso Denegado: X-Sakti-Token inválido o revocado."
         )
     
-    return cliente[0]  # Retorna el nombre de la empresa real extraído de la fila
+    return cliente[0]  # Retorna el nombre de la empresa real (Alfa, Beta, Gamma)
 
 class LogPayload(pydantic.BaseModel):
     client_ip: str
