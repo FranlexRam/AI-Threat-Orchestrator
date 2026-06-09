@@ -14,7 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api_ingest.py .
 COPY brain.py .
 COPY orchestrator_core.py .
-COPY security_vault.db .
 
 # 6. Exponemos el puerto 8000 que usa FastAPI
 EXPOSE 8000

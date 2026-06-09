@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 🔒 INICIALIZACIÓN DEL SISTEMA DE AUTENTICACIÓN ---
+# --- 🔒 INICIALIZACIÓN COMPLETA DEL SISTEMA DE AUTENTICACIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "user_rol" not in st.session_state:
@@ -27,7 +27,7 @@ if "tema_claro" not in st.session_state:
 def obtener_conexion_pg():
     """🛡️ Obtiene conexión limpia a PostgreSQL leyendo variables de entorno"""
     return psycopg2.connect(
-        host=os.getenv("DB_HOST", "saktishield-db"),  # 🖥️ Cambiado por defecto al nombre del servicio Docker
+        host=os.getenv("DB_HOST", "saktishield-db"),  # 🖥️ Nombre del servicio Docker
         database=os.getenv("DB_NAME", "saktishield_production"),
         user=os.getenv("DB_USER", "sakti_admin"),
         password=os.getenv("DB_PASSWORD", "SaktiSecurePassword2026!"),
@@ -48,7 +48,7 @@ def inicializar_base_datos():
                 username VARCHAR(50) UNIQUE NOT NULL,
                 password VARCHAR(100) NOT NULL,
                 rol VARCHAR(20) NOT NULL, -- SUPERADMIN o CLIENT_ADMIN
-                empresa_name VARCHAR(100), -- NULL para SUPERADMIN, nombre exacto para clientes
+                empresa_name VARCHAR(100), -- NULL para SUPERADMIN
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -65,7 +65,6 @@ def inicializar_base_datos():
         cursor.close()
         conn.close()
     except Exception as e:
-        # Lo mostramos como advertencia por si Postgres tarda unos segundos extras en iniciar
         st.warning(f"Esperando sincronización con el clúster Postgres...")
 
 # Disparamos la verificación de tablas de seguridad de forma silenciosa
@@ -76,7 +75,6 @@ inicializar_base_datos()
 # 🚪 FLUJO EXCLUSIVO DE PANTALLA DE LOGIN
 # ==============================================================================
 if not st.session_state.autenticado:
-    # Paleta de diseño temporal minimalista solo para la caja de Login
     st.markdown("""
         <style>
         .stApp { background-color: #080809 !important; color: #FFFFFF !important; }
@@ -101,11 +99,9 @@ if not st.session_state.autenticado:
             boton_enviar = st.form_submit_button("Ingresar al Centro de Operaciones", use_container_width=True)
             
             if boton_enviar:
-                # 🧼 Limpiamos espacios en blanco accidentales de los inputs
                 user_limpio = input_user.strip()
                 pass_limpio = input_pass.strip()
                 
-                # 🔒 BYPASS HARDCODED ABSOLUTO (Se evalúa primero, ignorando fallas de la base de datos)
                 if user_limpio == "sakti_root" and pass_limpio == "sakti123":
                     st.session_state.autenticado = True
                     st.session_state.user_rol = "SUPERADMIN"
@@ -121,7 +117,6 @@ if not st.session_state.autenticado:
                     time.sleep(0.4)
                     st.rerun()
                 else:
-                    # Solo si NO coincide con las maestras de desarrollo, intentamos autenticar por DB
                     try:
                         conn = obtener_conexion_pg()
                         cursor = conn.cursor()
@@ -142,7 +137,7 @@ if not st.session_state.autenticado:
                             st.error("❌ Credenciales inválidas.")
                     except Exception as db_error:
                         st.error(f"❌ Error de comunicación con el clúster: {db_error}")
-    st.stop()  # 🚫 DETIENE POR COMPLETO LA RENDERIZACIÓN SI NO ESTÁ LOGUEADO
+    st.stop()  # 🚫 AHORA SÓLO DETIENE AQUÍ DENTRO SI NO ESTÁ AUTENTICADO
 
 
 # ==============================================================================
@@ -185,14 +180,8 @@ st.markdown(f"""
     .stApp {{ background-color: {bg_app} !important; color: {text_main} !important; }}
     .main {{ background-color: {bg_app} !important; }}
     hr {{ border-top: 1px solid #FF0033 !important; opacity: 0.3; }}
-
-    /* Selector de Streamlit Adaptable */
-    div[data-baseweb="select"] {{
-        background-color: {bg_card} !important;
-        color: {text_main} !important;
-    }}
+    div[data-baseweb="select"] {{ background-color: {bg_card} !important; color: {text_main} !important; }}
     
-    /* Tabla SOC HTML Adaptable */
     .tabla-soc-container {{
         max-height: 410px; 
         overflow-y: auto; 
@@ -200,57 +189,24 @@ st.markdown(f"""
         border-radius: 6px;
         background-color: {bg_card};
     }}
-    .tabla-soc {{
-        width: 100%; 
-        border-collapse: collapse; 
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
-        color: {text_main}; 
-        text-align: left;
-    }}
-    .tabla-soc thead tr {{
-        background-color: {"#E4E4E7" if st.session_state.tema_claro else "#18181B"}; 
-        border-bottom: 2px solid {border_color}; 
-        position: sticky; 
-        top: 0; 
-        z-index: 10;
-    }}
-    .tabla-soc th {{
-        padding: 14px; 
-        font-size: 13px; 
-        font-weight: 700; 
-        color: {text_muted};
-        text-transform: uppercase;
-    }}
+    .tabla-soc {{ width: 100%; border-collapse: collapse; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: {text_main}; text-align: left; }}
+    .tabla-soc thead tr {{ background-color: {"#E4E4E7" if st.session_state.tema_claro else "#18181B"}; border-bottom: 2px solid {border_color}; position: sticky; top: 0; z-index: 10; }}
+    .tabla-soc th {{ padding: 14px; font-size: 13px; font-weight: 700; color: {text_muted}; text-transform: uppercase; }}
     .tabla-soc tbody tr {{ border-bottom: 1px solid {border_color}; font-size: 15px; }}
     .tabla-soc tbody tr:hover {{ background-color: {"#FAFAFA" if st.session_state.tema_claro else "#141416"}; }}
     .tabla-soc td {{ padding: 14px; color: {text_main}; }}
     
-    /* Badges de Severidad */
     .badge-critico {{ color: #FF0033; font-weight: 700; }}
     .badge-medio {{ color: {badge_medio}; font-weight: 700; opacity: 0.8; }}
     .badge-bajo {{ color: {text_muted}; font-weight: 500; }}
     
-    /* Tarjeta Forense */
     .forensic-card {{
-        background-color: {bg_card};
-        border-left: 6px solid #FF0033; 
-        padding: 35px;
-        border-radius: 6px;
-        border-top: 1px solid {border_color};
-        border-right: 1px solid {border_color};
-        border-bottom: 1px solid {border_color};
-        margin-top: 25px;
+        background-color: {bg_card}; border-left: 6px solid #FF0033; padding: 35px; border-radius: 6px;
+        border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color}; margin-top: 25px;
     }}
     .forensic-header {{ font-size: 24px; font-weight: 800; color: {text_main}; margin-bottom: 20px; }}
     .forensic-text {{ font-size: 17px; color: {text_main}; line-height: 1.7; }}
-    .forensic-text code {{
-        background-color: {code_bg};
-        color: #FF0033; 
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 15px;
-        font-family: monospace;
-    }}
+    .forensic-text code {{ background-color: {code_bg}; color: #FF0033; padding: 4px 8px; border-radius: 4px; font-size: 15px; font-family: monospace; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -293,42 +249,57 @@ if st.session_state.user_rol == "SUPERADMIN":
     seleccion_sidebar = st.sidebar.selectbox("Filtrar Vista Operativa:", opciones_filtro)
     empresa_a_consultar = seleccion_sidebar
 
-# --- FUNCIÓN PARA LEER LA DB (POSTGRESQL - TENANT ISOLATION) ---
+# --- FUNCIÓN PARA LEER LA DB (🐘 MAPEADA A LA TABLA SAKTI_INCIDENTS DE PRODUCCIÓN) ---
 def cargar_datos_pg(target_tenant, rol):
     try:
         conn = obtener_conexion_pg()
+        
+        # Consultamos mapeando los nombres reales de las columnas que guarda la API
         if rol == "SUPERADMIN" and target_tenant == "TODOS LOS CLIENTES":
             query = """
-                SELECT id, fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion, empresa_name 
-                FROM "incidentes" 
-                WHERE categoria != 'Tráfico Legítimo'
-                ORDER BY fecha DESC
+                SELECT id, created_at AS fecha, client_ip AS ip_origen, resultado_ia AS analisis_ia, 
+                       'Ataque' AS categoria, alerta_status AS nivel_riesgo, log_entry AS log_original, empresa_name 
+                FROM sakti_incidents 
+                ORDER BY created_at DESC
             """
             df = pd.read_sql_query(query, conn)
         else:
             query = """
-                SELECT id, fecha, ip_origen, analisis_ia, categoria, nivel_riesgo, estatus, log_original, accion_mitigacion, empresa_name 
-                FROM "incidentes" 
-                WHERE categoria != 'Tráfico Legítimo' AND empresa_name = %s
-                ORDER BY fecha DESC
+                SELECT id, created_at AS fecha, client_ip AS ip_origen, resultado_ia AS analisis_ia, 
+                       'Ataque' AS categoria, alerta_status AS nivel_riesgo, log_entry AS log_original, empresa_name 
+                FROM sakti_incidents 
+                WHERE empresa_name = %s
+                ORDER BY created_at DESC
             """
             df = pd.read_sql_query(query, conn, params=(target_tenant,))
             
         conn.close()
         
+        # 🧠 Extracción inteligente del tipo de vector desde la respuesta estructurada de la IA
         if not df.empty:
-            df['categoria'] = df['categoria'].replace({
-                'SSRF Attack (Server-Side Request Forgery)': 'SSRF Attack'
-            })
+            df['fecha'] = df['fecha'].astype(str)
+            # Re-calibramos la columna categoría leyendo el fragmento analítico del motor core
+            def extraer_categoria(text):
+                t = str(text).upper()
+                if "SQL" in t or "INJECTION" in t: return "SQL Injection"
+                if "XSS" in t or "SCRIPT" in t: return "XSS (Cross-Site Scripting)"
+                if "RCE" in t or "EXECUTION" in t or "SHELL" in t: return "Remote Code Execution (RCE)"
+                if "BRUTE" in t or "FORCE" in t: return "Brute Force"
+                if "SSRF" in t: return "SSRF Attack"
+                if "TRAVERSAL" in t: return "Directory Traversal"
+                return "Otras Amenazas"
+            
+            df['categoria'] = df['analisis_ia'].apply(extraer_categoria)
+            
         return df
-    except:
-        return pd.DataFrame(columns=["id", "fecha", "ip_origen", "analisis_ia", "categoria", "nivel_riesgo", "estatus", "log_original", "accion_mitigacion", "empresa_name"])
+    except Exception as e:
+        return pd.DataFrame(columns=["id", "fecha", "ip_origen", "analisis_ia", "categoria", "nivel_riesgo", "log_original", "empresa_name"])
 
 # --- RENDERIZACIÓN OPERATIVA DEL PANEL SOC ---
 df = cargar_datos_pg(empresa_a_consultar, st.session_state.user_rol)
 
 total_incidentes = len(df)
-amenazas_criticas = len(df[df["nivel_riesgo"].str.upper().isin(["CRÍTICO", "CRITICO", "ALTO"])]) if not df.empty else 0
+amenazas_criticas = len(df[df["nivel_riesgo"].str.upper().isin(["CRÍTICO", "CRITICO", "ALTO", "BLOQUEADO"])]) if not df.empty else 0
 ips_bloqueadas = df["ip_origen"].nunique() if not df.empty else 0
 
 # --- TARJETAS DE MÉTRICAS HTML ---
@@ -337,7 +308,7 @@ m1, m2, m3 = st.columns(3)
 
 with m1:
     st.markdown(f"""
-        <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
             <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Total Incidentes</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{total_incidentes}</div>
         </div>
@@ -345,7 +316,7 @@ with m1:
     
 with m2:
     st.markdown(f"""
-        <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
             <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Amenazas Críticas Mitigadas</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{amenazas_criticas}</div>
         </div>
@@ -353,7 +324,7 @@ with m2:
     
 with m3:
     st.markdown(f"""
-        <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
             <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">IPs Únicas Bloqueadas</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{ips_bloqueadas}</div>
         </div>
@@ -378,7 +349,7 @@ if df.empty:
                 📡 Centro de Operaciones de Seguridad (SOC) Activo para: <span style="color:#FF0033;">{empresa_a_consultar}</span>
             </p>
             <p style="color: {text_muted}; font-size: 14px; margin: 5px 0 0 0;">
-                Escuchando transmisiones en tiempo real en PostgreSQL. Esperando la inyección de las primeras telemetrías de ataque...
+                Escuchando transmisiones en tiempo real en la tabla 'sakti_incidents'. Esperando telemetrías de ataque...
             </p>
         </div>
     """, unsafe_allow_html=True)
@@ -402,7 +373,7 @@ else:
     with c2:
         st.markdown(f"<h3 style='color:{text_main}; font-weight:700;'>📋 Historial de Eventos Recientes</h3>", unsafe_allow_html=True)
         
-        columnas_vista = ["fecha", "ip_origen", "categoria", "nivel_riesgo", "accion_mitigacion"]
+        columnas_vista = ["fecha", "ip_origen", "categoria", "nivel_riesgo"]
         if st.session_state.user_rol == "SUPERADMIN" and empresa_a_consultar == "TODOS LOS CLIENTES":
             columnas_vista.append("empresa_name")
             
@@ -410,16 +381,15 @@ else:
         
         def parsear_fila_html(row):
             sev = str(row["nivel_riesgo"]).upper()
-            clase = "badge-critico" if any(x in sev for x in ["CRÍT", "CRIT", "ALT"]) else ("badge-medio" if "MED" in sev else "badge-bajo")
+            clase = "badge-critico" if any(x in sev for x in ["CRÍT", "CRIT", "ALT", "BLOQ"]) else "badge-bajo"
             row["nivel_riesgo"] = f'<span class="{clase}">{row["nivel_riesgo"]}</span>'
             row["ip_origen"] = f'<code style="color: #FF0033; font-family: monospace; background:{code_bg}; padding:2px 6px; border-radius:4px;">{row["ip_origen"]}</code>'
-            row["accion_mitigacion"] = f'<span style="color: {text_muted}; font-style: italic;">{row["accion_mitigacion"]}</span>'
             if "empresa_name" in row:
                 row["empresa_name"] = f'<b style="color: {text_main}; font-size:13px;">{row["empresa_name"]}</b>'
             return row
 
         df_vista = df_vista.apply(parsear_fila_html, axis=1)
-        cabeceras_tabla = ["Fecha y Hora", "Dirección IP", "Vector de Ataque", "Severidad", "Acción Defensiva (SOAR)"]
+        cabeceras_tabla = ["Fecha", "Dirección IP", "Vector", "Estado Perimetral"]
         if "empresa_name" in df_vista.columns:
             cabeceras_tabla.append("Cliente Afectado")
             
@@ -441,13 +411,12 @@ else:
         <div class="forensic-card" style="border-left: 6px solid {color_map.get(fila_seleccionada['categoria'], '#FF0033')};">
             <div class="forensic-header">🛡️ REPORTE DE AUDITORÍA: {fila_seleccionada['categoria'].upper()}</div>
             <div class="forensic-text">
-                <b>Fecha:</b> {fila_seleccionada['fecha']} &nbsp;|&nbsp; <b>IP:</b> <code>{fila_seleccionada['ip_origen']}</code> &nbsp;|&nbsp; <b>Riesgo:</b> {fila_seleccionada['nivel_riesgo']}<br>
-                <b>Cliente Protegido:</b> <span style="color:#FF0033; font-weight:700;">{fila_seleccionada['empresa_name']}</span><br>
-                <b>Mitigación SOAR:</b> <span style="font-weight: 700;">{fila_seleccionada['accion_mitigacion']}</span><br>
-                <b>Payload Detectado:</b> <code>{fila_seleccionada['log_original']}</code><br><br>
+                <b>Fecha y Hora:</b> {fila_seleccionada['fecha']} &nbsp;|&nbsp; <b>IP Origen:</b> <code>{fila_seleccionada['ip_origen']}</code> &nbsp;|&nbsp; <b>Status:</b> {fila_seleccionada['nivel_riesgo']}<br>
+                <b>Cliente Afectado:</b> <span style="color:#FF0033; font-weight:700;">{fila_seleccionada['empresa_name']}</span><br>
+                <b>Log de Telemetría Crudo:</b> <code>{fila_seleccionada['log_original']}</code><br><br>
                 <div style="margin-top:15px; border-top:1px solid {border_color}; padding-top:15px;">
-                    <b>Análisis Forense Virtual AI:</b><br>
-                    <span style="color: {text_main}; font-size:18px;">{fila_seleccionada['analisis_ia']}</span>
+                    <b>Orquestación y Dictamen de la Inteligencia Artificial (SaktiShield AI):</b><br>
+                    <span style="color: {text_main}; font-size:16px;">{fila_seleccionada['analisis_ia']}</span>
                 </div>
             </div>
         </div>

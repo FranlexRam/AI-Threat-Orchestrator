@@ -40,6 +40,32 @@ def obtener_conexion_db():
         port=os.getenv("DB_PORT", "5432")
     )
 
+def crear_tabla_incidentes_if_not_exists():
+    """🐘 AUTOMATIZACIÓN: Asegura la existencia de la estructura corporativa en Postgres al arrancar"""
+    try:
+        conn = obtener_conexion_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sakti_incidents (
+                id SERIAL PRIMARY KEY,
+                empresa_name VARCHAR(100),
+                client_ip VARCHAR(50),
+                log_entry TEXT,
+                resultado_ia TEXT,
+                alerta_status VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("🛡️ [POSTGRESQL]: Tabla 'sakti_incidents' verificada y lista para operar.")
+    except Exception as e:
+        print(f"⚠️ [POSTGRESQL]: No se pudo verificar/crear la tabla de incidentes: {e}")
+
+# Ejecutamos la verificación de la tabla al cargar el módulo
+crear_tabla_incidentes_if_not_exists()
+
 def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
     """
     🧠 FILTRO DINÁMICO PERIMETRAL: Busca y valida la credencial directamente 
@@ -53,11 +79,9 @@ def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
     
     # 🛡️ CONEXIÓN AL VAULT LOCAL DE SEGURIDAD (SQLite)
     try:
-        # Docker mapea este archivo en la raíz /app/security_vault.db
         conn = sqlite3.connect("security_vault.db")
         cursor = conn.cursor()
         
-        # En SQLite los marcadores usan '?' en vez de '%s'
         cursor.execute(
             "SELECT empresa_name FROM sakti_customers WHERE api_key = ? AND estatus = 'ACTIVO'", 
             (api_key,)
@@ -71,14 +95,13 @@ def validar_api_key(api_key: str = Security(X_SAKTI_TOKEN)):
             detail=f"Fallo de enlace con el vault local perimetral (SQLite): {str(e)}"
         )
     
-    # Si la consulta no devuelve filas, el token es falso o fue revocado
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Acceso Denegado: X-Sakti-Token inválido o revocado."
         )
     
-    return cliente[0]  # Retorna el nombre de la empresa real (Alfa, Beta, Gamma)
+    return cliente[0]
 
 class LogPayload(pydantic.BaseModel):
     client_ip: str
@@ -96,21 +119,31 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         ip_cliente = payload.client_ip
         log_crudo = payload.log_entry
         
-        # Log informativo en tu consola para saber qué cliente corporativo está enviando datos
         print(f"\n[🔑 AUTENTICADO]: Tráfico recibido de cliente SaaS: -> {empresa_cliente}")
         
-        # 🛡️ FILTRO AUTOLIMPIANTE EN RAM
-        log_decoded = urllib.parse.unquote(log_crudo).replace('+', ' ').upper()
+        # 🛡️ FILTRO AUTOLIMPIANTE EN RAM (Separación de casos analíticos)
+        log_decoded = urllib.parse.unquote(log_crudo).replace('+', ' ')
+        log_upper = log_decoded.upper()
         
-        # 🟢 MODIFICACIÓN AQUÍ: Añadimos los disparadores para SSRF y Fuerza Bruta
-        patrones_peligro = [
-            "<SCRIPT", "SCRIPT>", "ALERT(", "UNION", "SELECT", 
-            "../", "..\\", "/ETC/PASSWD", "WHOAMI", "LOCALHOST", "127.0.0.1",
-            "169.254.169.254", "METADATA",  # 📡 Disparadores para detectar SSRF
-            "FAILED LOGIN", "INVALID CREDENTIALS", "FAILED"  # 🔑 Disparadores para detectar Fuerza Bruta
+        disparadores_rce = [
+            ";", "|", "&&", "`", "$(", 
+            "whoami", "WHOAMI", "id", "ID", "uname", "UNAME", 
+            "nc", "NC", "netcat", "NETCAT", "wget", "WGET", 
+            "curl", "CURL", "bash", "BASH", "sh", "SH"
+        ]
+
+        disparadores_web = [
+            "169.254.169.254", "METADATA", "LOCALHOST", "127.0.0.1",
+            "../", "..\\", "/ETC/PASSWD", "BOOT.INI", "WIN.INI",
+            "UNION", "SELECT", "INSERT", "DROP", "UPDATE", "OR 1=1", "--",
+            "<SCRIPT", "SCRIPT>", "ALERT(", "ONLOAD=", "ONERROR=",
+            "FAILED LOGIN", "INVALID CREDENTIALS", "AUTH_FAILURE"
         ]
         
-        requiere_ia = any(patron in log_decoded for patron in patrones_peligro)
+        detectado_rce = any(patron in log_decoded for patron in disparadores_rce)
+        detectado_web = any(patron in log_upper for patron in disparadores_web)
+        
+        requiere_ia = detectado_rce or detectado_web
         
         if not requiere_ia:
             return JSONResponse(
@@ -127,14 +160,29 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         print(f"[🚀 API PIPELINE]: Alerta perimetral activada para {empresa_cliente} (IP {ip_cliente}). Escalando...")
         resultado_brain = orchestrator_ai(log_crudo, client_ip=ip_cliente)
         
-        # 🛡️ CONTROL DE PROTECCIÓN: Validamos que contenga el separador para evitar caídas
         if " - " in resultado_brain:
             partes = resultado_brain.split(" - ")
             status_final = partes[0]
         else:
-            # Si el core responde directo o es un bloqueo por volumen, lo catalogamos por defecto como BLOQUEADO / CRÍTICO
             status_final = "BLOQUEADO"
         
+        # 🐘 PERSISTENCIA EN POSTGRESQL (Para alimentar los gráficos del Dashboard)
+        try:
+            conn_pg = obtener_conexion_db()
+            cursor_pg = conn_pg.cursor()
+            cursor_pg.execute(
+                """INSERT INTO sakti_incidents (empresa_name, client_ip, log_entry, resultado_ia, alerta_status) 
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (empresa_cliente, ip_cliente, log_crudo, resultado_brain, status_final)
+            )
+            conn_pg.commit()
+            cursor_pg.close()
+            conn_pg.close()
+            print(f"✅ Incidente persistido en Postgres para {empresa_cliente}")
+        except Exception as db_err:
+            print(f"❌ Error guardando incidente en Postgres: {db_err}")
+        
+        # 🛡️ ESTRUCTURA DE ALERTA PARA STREAMING EN VIVO
         alerta_dashboard = {
             "ip": ip_cliente,
             "log": log_crudo,
