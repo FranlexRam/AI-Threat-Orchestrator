@@ -48,7 +48,7 @@ def inicializar_base_datos():
                 username VARCHAR(50) UNIQUE NOT NULL,
                 password VARCHAR(100) NOT NULL,
                 rol VARCHAR(20) NOT NULL, -- SUPERADMIN o CLIENT_ADMIN
-                empresa_name VARCHAR(100), -- NULL para SUPERADMIN
+                empresa_name VARCHAR(100), -- NULL para SUPERADMIN o 'GLOBAL'
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -72,7 +72,7 @@ inicializar_base_datos()
 
 
 # ==============================================================================
-# 🚪 FLUJO EXCLUSIVO DE PANTALLA DE LOGIN
+# 🚪 FLUJO EXCLUSIVO DE PANTALLA DE LOGIN (DINÁMICO Y CENTRALIZADO)
 # ==============================================================================
 if not st.session_state.autenticado:
     st.markdown("""
@@ -102,42 +102,33 @@ if not st.session_state.autenticado:
                 user_limpio = input_user.strip()
                 pass_limpio = input_pass.strip()
                 
-                if user_limpio == "sakti_root" and pass_limpio == "sakti123":
-                    st.session_state.autenticado = True
-                    st.session_state.user_rol = "SUPERADMIN"
-                    st.session_state.user_empresa = "GLOBAL"
-                    st.success("🔒 Acceso máster verificado. Conectando...")
-                    time.sleep(0.4)
-                    st.rerun()
-                elif user_limpio == "alfa_admin" and pass_limpio == "alfa123":
-                    st.session_state.autenticado = True
-                    st.session_state.user_rol = "CLIENT_ADMIN"
-                    st.session_state.user_empresa = "Empresa Alfa C.A."
-                    st.success("🔒 Entorno protegido verificado. Conectando...")
-                    time.sleep(0.4)
-                    st.rerun()
-                else:
-                    try:
-                        conn = obtener_conexion_pg()
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "SELECT rol, empresa_name FROM sakti_users WHERE username = %s AND password = %s;",
-                            (user_limpio, pass_limpio)
-                        )
-                        usuario_encontrado = cursor.fetchone()
-                        cursor.close()
-                        conn.close()
+                try:
+                    conn = obtener_conexion_pg()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT rol, empresa_name FROM sakti_users WHERE username = %s AND password = %s;",
+                        (user_limpio, pass_limpio)
+                    )
+                    usuario_encontrado = cursor.fetchone()
+                    cursor.close()
+                    conn.close()
+                    
+                    if usuario_encontrado:
+                        rol_detectado = usuario_encontrado[0]
+                        empresa_detectada = usuario_encontrado[1]
                         
-                        if usuario_encontrado:
-                            st.session_state.autenticado = True
-                            st.session_state.user_rol = usuario_encontrado[0]
-                            st.session_state.user_empresa = usuario_encontrado[1]
-                            st.rerun()
-                        else:
-                            st.error("❌ Credenciales inválidas.")
-                    except Exception as db_error:
-                        st.error(f"❌ Error de comunicación con el clúster: {db_error}")
-    st.stop()  # 🚫 AHORA SÓLO DETIENE AQUÍ DENTRO SI NO ESTÁ AUTENTICADO
+                        st.session_state.autenticado = True
+                        st.session_state.user_rol = rol_detectado
+                        st.session_state.user_empresa = empresa_detectada
+                        
+                        st.success(f"🔒 Acceso verificado con éxito [{empresa_detectada}]. Conectando...")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error("❌ Credenciales inválidas.")
+                except Exception as db_error:
+                    st.error(f"❌ Error de comunicación con el clúster: {db_error}")
+    st.stop()
 
 
 # ==============================================================================
@@ -196,17 +187,10 @@ st.markdown(f"""
     .tabla-soc tbody tr:hover {{ background-color: {"#FAFAFA" if st.session_state.tema_claro else "#141416"}; }}
     .tabla-soc td {{ padding: 14px; color: {text_main}; }}
     
-    .badge-critico {{ color: #FF0033; font-weight: 700; }}
-    .badge-medio {{ color: {badge_medio}; font-weight: 700; opacity: 0.8; }}
-    .badge-bajo {{ color: {text_muted}; font-weight: 500; }}
-    
-    .forensic-card {{
-        background-color: {bg_card}; border-left: 6px solid #FF0033; padding: 35px; border-radius: 6px;
-        border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color}; margin-top: 25px;
-    }}
-    .forensic-header {{ font-size: 24px; font-weight: 800; color: {text_main}; margin-bottom: 20px; }}
-    .forensic-text {{ font-size: 17px; color: {text_main}; line-height: 1.7; }}
-    .forensic-text code {{ background-color: {code_bg}; color: #FF0033; padding: 4px 8px; border-radius: 4px; font-size: 15px; font-family: monospace; }}
+    .badge-critico {{ color: #EF4444; font-weight: 700; }}
+    .badge-alto {{ color: #F97316; font-weight: 700; }}
+    .badge-medio {{ color: #F59E0B; font-weight: 700; }}
+    .badge-bajo {{ color: #10B981; font-weight: 500; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -226,7 +210,7 @@ with col_header_left:
         else:
             st.markdown(f"<p style='color: {text_muted}; font-size: 15px; margin-top: 5px;'>Entorno Protegido para: <b>{st.session_state.user_empresa}</b></p>", unsafe_allow_html=True)
 
-# --- CONFIGURACIÓN BARRA LATERAL (CONTROL MULTI-TENANT) ---
+# --- 🎛️ CONFIGURACIÓN BARRA LATERAL ---
 empresa_a_consultar = st.session_state.user_empresa
 
 if st.session_state.user_rol == "SUPERADMIN":
@@ -235,30 +219,32 @@ if st.session_state.user_rol == "SUPERADMIN":
     try:
         conn = obtener_conexion_pg()
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT empresa_name FROM sakti_users WHERE empresa_name != 'GLOBAL';")
+        cursor.execute("""
+            SELECT DISTINCT empresa_name 
+            FROM sakti_users 
+            WHERE rol = 'CLIENT_ADMIN' AND empresa_name IS NOT NULL AND empresa_name != 'GLOBAL'
+            ORDER BY empresa_name;
+        """)
         lista_empresas = [fila[0] for fila in cursor.fetchall() if fila[0]]
         cursor.close()
         conn.close()
-    except:
+    except Exception:
         lista_empresas = []
-        
-    if "Empresa Alfa C.A." not in lista_empresas:
-        lista_empresas.append("Empresa Alfa C.A.")
         
     opciones_filtro = ["TODOS LOS CLIENTES"] + lista_empresas
     seleccion_sidebar = st.sidebar.selectbox("Filtrar Vista Operativa:", opciones_filtro)
     empresa_a_consultar = seleccion_sidebar
 
-# --- FUNCIÓN PARA LEER LA DB (🐘 MAPEADA A LA TABLA SAKTI_INCIDENTS DE PRODUCCIÓN) ---
+# --- FUNCIÓN PARA LEER LA DB ---
 def cargar_datos_pg(target_tenant, rol):
     try:
         conn = obtener_conexion_pg()
         
-        # Consultamos mapeando los nombres reales de las columnas que guarda la API
         if rol == "SUPERADMIN" and target_tenant == "TODOS LOS CLIENTES":
             query = """
                 SELECT id, created_at AS fecha, client_ip AS ip_origen, resultado_ia AS analisis_ia, 
-                       'Ataque' AS categoria, alerta_status AS nivel_riesgo, log_entry AS log_original, empresa_name 
+                       alerta_status AS estado_perimetral, nivel_riesgo, tipo_ataque AS categoria, 
+                       log_entry AS log_original, soar_active, empresa_name 
                 FROM sakti_incidents 
                 ORDER BY created_at DESC
             """
@@ -266,7 +252,8 @@ def cargar_datos_pg(target_tenant, rol):
         else:
             query = """
                 SELECT id, created_at AS fecha, client_ip AS ip_origen, resultado_ia AS analisis_ia, 
-                       'Ataque' AS categoria, alerta_status AS nivel_riesgo, log_entry AS log_original, empresa_name 
+                       alerta_status AS estado_perimetral, nivel_riesgo, tipo_ataque AS categoria, 
+                       log_entry AS log_original, soar_active, empresa_name 
                 FROM sakti_incidents 
                 WHERE empresa_name = %s
                 ORDER BY created_at DESC
@@ -275,32 +262,19 @@ def cargar_datos_pg(target_tenant, rol):
             
         conn.close()
         
-        # 🧠 Extracción inteligente del tipo de vector desde la respuesta estructurada de la IA
         if not df.empty:
             df['fecha'] = df['fecha'].astype(str)
-            # Re-calibramos la columna categoría leyendo el fragmento analítico del motor core
-            def extraer_categoria(text):
-                t = str(text).upper()
-                if "SQL" in t or "INJECTION" in t: return "SQL Injection"
-                if "XSS" in t or "SCRIPT" in t: return "XSS (Cross-Site Scripting)"
-                if "RCE" in t or "EXECUTION" in t or "SHELL" in t: return "Remote Code Execution (RCE)"
-                if "BRUTE" in t or "FORCE" in t: return "Brute Force"
-                if "SSRF" in t: return "SSRF Attack"
-                if "TRAVERSAL" in t: return "Directory Traversal"
-                return "Otras Amenazas"
-            
-            df['categoria'] = df['analisis_ia'].apply(extraer_categoria)
             
         return df
     except Exception as e:
-        return pd.DataFrame(columns=["id", "fecha", "ip_origen", "analisis_ia", "categoria", "nivel_riesgo", "log_original", "empresa_name"])
+        return pd.DataFrame(columns=["id", "fecha", "ip_origen", "analisis_ia", "estado_perimetral", "nivel_riesgo", "categoria", "log_original", "soar_active", "empresa_name"])
 
 # --- RENDERIZACIÓN OPERATIVA DEL PANEL SOC ---
 df = cargar_datos_pg(empresa_a_consultar, st.session_state.user_rol)
 
 total_incidentes = len(df)
-amenazas_criticas = len(df[df["nivel_riesgo"].str.upper().isin(["CRÍTICO", "CRITICO", "ALTO", "BLOQUEADO"])]) if not df.empty else 0
-ips_bloqueadas = df["ip_origen"].nunique() if not df.empty else 0
+amenazas_criticas = len(df[df["nivel_riesgo"].str.upper().isin(["CRÍTICO", "CRITICO", "ALTO"])]) if not df.empty else 0
+ips_bloqueadas = df[df["estado_perimetral"] == "BLOQUEADO"]["ip_origen"].nunique() if not df.empty else 0
 
 # --- TARJETAS DE MÉTRICAS HTML ---
 st.markdown("<br>", unsafe_allow_html=True)
@@ -309,7 +283,7 @@ m1, m2, m3 = st.columns(3)
 with m1:
     st.markdown(f"""
         <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
-            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Total Incidentes</div>
+            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Total Incidentes Registrados</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{total_incidentes}</div>
         </div>
     """, unsafe_allow_html=True)
@@ -317,7 +291,7 @@ with m1:
 with m2:
     st.markdown(f"""
         <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
-            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Amenazas Críticas Mitigadas</div>
+            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Amenazas Críticas / Altas</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{amenazas_criticas}</div>
         </div>
     """, unsafe_allow_html=True)
@@ -325,7 +299,7 @@ with m2:
 with m3:
     st.markdown(f"""
         <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
-            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">IPs Únicas Bloqueadas</div>
+            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">IPs Únicas Mitigadas</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{ips_bloqueadas}</div>
         </div>
     """, unsafe_allow_html=True)
@@ -333,15 +307,17 @@ with m3:
 st.markdown("<br>", unsafe_allow_html=True)
 
 color_map = {
-    "Brute Force": "#FF0033",
-    "SQL Injection": "#80001A",
-    "XSS (Cross-Site Scripting)": "#0066FF",
+    "Brute Force Attack": "#FF0033",
+    "SQL Injection (SQLi)": "#80001A",
+    "Cross-Site Scripting (XSS)": "#0066FF",
     "Directory Traversal": "#EAB308",  
     "Remote Code Execution (RCE)": "#FF6600",
     "SSRF Attack": "#71717A",
-    "Otras Amenazas": "#444444"
+    "Tráfico Rutinario": "#10B981",
+    "Anomalía de Red detectada por IA": "#444444"
 }
 
+# --- CONTROL MULTI-TENANT DE RENDERIZADO VISUAL EN BASE A DATA ---
 if df.empty:
     st.markdown(f"""
         <div style="padding: 30px; background-color: {bg_card}; border: 1px dashed #FF0033; border-radius: 6px; text-align: center;">
@@ -349,12 +325,12 @@ if df.empty:
                 📡 Centro de Operaciones de Seguridad (SOC) Activo para: <span style="color:#FF0033;">{empresa_a_consultar}</span>
             </p>
             <p style="color: {text_muted}; font-size: 14px; margin: 5px 0 0 0;">
-                Escuchando transmisiones en tiempo real en la tabla 'sakti_incidents'. Esperando telemetrías de ataque...
+                No se registran telemetrías anómalas ni eventos perimetrales para este tenant en PostgreSQL.
             </p>
         </div>
     """, unsafe_allow_html=True)
 else:
-    # --- COLUMNAS RESPONSIVE OPTIMIZADAS ---
+    # --- COLUMNAS RESPONSIVE OPTIMIZADAS (SOLO SE RENDERIZAN SI HAY EVENTOS) ---
     c1, c2 = st.columns([1, 1.2])
 
     with c1:
@@ -380,16 +356,24 @@ else:
         df_vista = df[columnas_vista].copy()
         
         def parsear_fila_html(row):
-            sev = str(row["nivel_riesgo"]).upper()
-            clase = "badge-critico" if any(x in sev for x in ["CRÍT", "CRIT", "ALT", "BLOQ"]) else "badge-bajo"
-            row["nivel_riesgo"] = f'<span class="{clase}">{row["nivel_riesgo"]}</span>'
+            riesgo = str(row["nivel_riesgo"]).upper()
+            if "CRÍT" in riesgo or "CRIT" in riesgo:
+                clase = "badge-critico"
+            elif "ALT" in riesgo:
+                clase = "badge-alto"
+            elif "MED" in riesgo:
+                clase = "badge-medio"
+            else:
+                clase = "badge-bajo"
+                
+            row["nivel_riesgo"] = f'<span class="{clase}">🚨 {row["nivel_riesgo"]}</span>'
             row["ip_origen"] = f'<code style="color: #FF0033; font-family: monospace; background:{code_bg}; padding:2px 6px; border-radius:4px;">{row["ip_origen"]}</code>'
             if "empresa_name" in row:
                 row["empresa_name"] = f'<b style="color: {text_main}; font-size:13px;">{row["empresa_name"]}</b>'
             return row
 
         df_vista = df_vista.apply(parsear_fila_html, axis=1)
-        cabeceras_tabla = ["Fecha", "Dirección IP", "Vector", "Estado Perimetral"]
+        cabeceras_tabla = ["Fecha", "Dirección IP", "Vector Detectado", "Nivel Riesgo"]
         if "empresa_name" in df_vista.columns:
             cabeceras_tabla.append("Cliente Afectado")
             
@@ -397,27 +381,54 @@ else:
         html_puro = df_vista.to_html(index=False, escape=False, classes="tabla-soc")
         st.markdown(f'<div class="tabla-soc-container">{html_puro}</div>', unsafe_allow_html=True)
 
-    # --- VISOR INTERACTIVO ---
+    # --- 🔒 VISOR INTERACTIVO ENCAPSULADO ESTRICTAMENTE ---
     st.markdown("<br><hr>", unsafe_allow_html=True)
     st.markdown(f"<h3 style='color:{text_main}; font-weight:700;'>🔍 Visor Interactivo de Auditoría SOC</h3>", unsafe_allow_html=True)
     
     df['selector_texto'] = df['fecha'] + " | " + df['categoria'] + " (" + df['ip_origen'] + ")"
     opciones_incidentes = df['selector_texto'].tolist()
     
-    incidente_seleccionado = st.selectbox("Selecciona un incidente para inspeccionar:", options=opciones_incidentes, index=0)
+    incidente_seleccionado = st.selectbox("Selecciona un incidente para inspeccionar de manera aislada:", options=opciones_incidentes, index=0)
     fila_seleccionada = df[df['selector_texto'] == incidente_seleccionado].iloc[0]
     
+    db_riesgo = str(fila_seleccionada['nivel_riesgo']).upper()
+    color_badge = "#EF4444" if "CRÍT" in db_riesgo or "CRIT" in db_riesgo or "ALT" in db_riesgo else ("#F59E0B" if "MED" in db_riesgo else "#10B981")
+    
     st.markdown(f"""
-        <div class="forensic-card" style="border-left: 6px solid {color_map.get(fila_seleccionada['categoria'], '#FF0033')};">
-            <div class="forensic-header">🛡️ REPORTE DE AUDITORÍA: {fila_seleccionada['categoria'].upper()}</div>
-            <div class="forensic-text">
-                <b>Fecha y Hora:</b> {fila_seleccionada['fecha']} &nbsp;|&nbsp; <b>IP Origen:</b> <code>{fila_seleccionada['ip_origen']}</code> &nbsp;|&nbsp; <b>Status:</b> {fila_seleccionada['nivel_riesgo']}<br>
-                <b>Cliente Afectado:</b> <span style="color:#FF0033; font-weight:700;">{fila_seleccionada['empresa_name']}</span><br>
-                <b>Log de Telemetría Crudo:</b> <code>{fila_seleccionada['log_original']}</code><br><br>
-                <div style="margin-top:15px; border-top:1px solid {border_color}; padding-top:15px;">
-                    <b>Orquestación y Dictamen de la Inteligencia Artificial (SaktiShield AI):</b><br>
-                    <span style="color: {text_main}; font-size:16px;">{fila_seleccionada['analisis_ia']}</span>
-                </div>
+        <div style="background-color: {bg_card}; padding: 25px; border-radius: 6px; border-left: 5px solid {color_badge}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color}; margin-top: 15px;">
+            <h4 style="color: {text_main}; margin-top:0; font-weight:800; letter-spacing:0.5px;">🛡️ REPORTE DE AUDITORÍA: {fila_seleccionada['categoria'].upper()}</h4>
+            <p style="color: {text_muted}; font-size:14px; margin-bottom:15px;">Tenant Auditado: <b>{fila_seleccionada['empresa_name']}</b></p>
+            <table style="width:100%; color:{text_main}; font-size:14px; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 6px 0; color:{text_muted}; width:25%;"><b>Fecha y Hora:</b></td>
+                    <td>{fila_seleccionada['fecha']}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color:{text_muted};"><b>IP de Origen:</b></td>
+                    <td style="color:#EF4444; font-family:monospace; font-weight:700;">{fila_seleccionada['ip_origen']}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color:{text_muted};"><b>Estado Perimetral:</b></td>
+                    <td><span style="background-color:{"#E4E4E7" if st.session_state.tema_claro else "#18181B"}; padding: 2px 8px; border-radius:4px; font-weight:bold;">{fila_seleccionada['estado_perimetral']}</span></td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color:{text_muted};"><b>Nivel de Riesgo:</b></td>
+                    <td><span style="color:{color_badge}; font-weight:bold;">🚨 {fila_seleccionada['nivel_riesgo']}</span></td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color:{text_muted};"><b>Orquestación SOAR:</b></td>
+                    <td style="color:#60A5FA; font-weight:bold;">{fila_seleccionada['soar_active']}</td>
+                </tr>
+            </table>
+            <br>
+            <div style="background-color: {code_bg}; padding: 15px; border-radius: 4px; border: 1px solid {border_color};">
+                <span style="color: {text_muted}; font-size: 12px; display:block; margin-bottom:5px;">LOG DE TELEMETRÍA CRUDO RECOLECTADO:</span>
+                <code style="color: #F43F5E; font-size:13px; word-break: break-all; font-family:monospace;">{fila_seleccionada['log_original']}</code>
+            </div>
+            <br>
+            <div style="background-color: {"#E0E7FF" if st.session_state.tema_claro else "#1E1B4B"}; padding: 15px; border-radius: 4px; border: 1px solid {"#C7D2FE" if st.session_state.tema_claro else "#312E81"};">
+                <span style="color: {"#4338CA" if st.session_state.tema_claro else "#C7D2FE"}; font-size: 12px; display:block; margin-bottom:5px;">DICTAMEN DEL MOTOR DE INTELIGENCIA ARTIFICIAL SAKTISHIELD AI (brain.py):</span>
+                <p style="color: {"#1E1B4B" if st.session_state.tema_claro else "#E0E7FF"}; font-size:14px; margin:0; line-height:1.5;">{fila_seleccionada['analisis_ia']}</p>
             </div>
         </div>
     """, unsafe_allow_html=True)
