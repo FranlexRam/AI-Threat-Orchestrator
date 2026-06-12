@@ -138,8 +138,9 @@ if not st.session_state.autenticado:
 # Fila superior minimalista para el switch de tema y botón de logout
 col_header_left, col_header_right = st.columns([8, 2])
 with col_header_right:
-    mode_toggle = st.toggle("☀️ Modo Claro", value=st.session_state.tema_claro)
-    st.session_state.tema_claro = mode_toggle
+    # 🛡️ Vinculación nativa y persistente usando key sin sobreescritura manual redundante
+    st.toggle("☀️ Modo Claro", key="tema_claro")
+    
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.autenticado = False
         st.session_state.user_rol = None
@@ -240,30 +241,47 @@ def cargar_datos_pg(target_tenant, rol):
     try:
         conn = obtener_conexion_pg()
         
+        # 🛡️ SOLUCIÓN AL BUG FANTASMA: Ampliamos las exclusiones de strings exactos para purgar todo el tráfico benigno
+        lista_exclusiones = ('Tráfico Legítimo', 'Tráfico Rutinario', 'Tráfico Legítimo (Rutinario)', 'Tráfico legítimo')
+        
         if rol == "SUPERADMIN" and target_tenant == "TODOS LOS CLIENTES":
             query = """
                 SELECT id, created_at AS fecha, client_ip AS ip_origen, resultado_ia AS analisis_ia, 
                        alerta_status AS estado_perimetral, nivel_riesgo, tipo_ataque AS categoria, 
                        log_entry AS log_original, soar_active, empresa_name 
                 FROM sakti_incidents 
+                WHERE tipo_ataque NOT IN %s
                 ORDER BY created_at DESC
             """
-            df = pd.read_sql_query(query, conn)
+            df = pd.read_sql_query(query, conn, params=(lista_exclusiones,))
         else:
             query = """
                 SELECT id, created_at AS fecha, client_ip AS ip_origen, resultado_ia AS analisis_ia, 
                        alerta_status AS estado_perimetral, nivel_riesgo, tipo_ataque AS categoria, 
                        log_entry AS log_original, soar_active, empresa_name 
                 FROM sakti_incidents 
-                WHERE empresa_name = %s
+                WHERE empresa_name = %s AND tipo_ataque NOT IN %s
                 ORDER BY created_at DESC
             """
-            df = pd.read_sql_query(query, conn, params=(target_tenant,))
+            df = pd.read_sql_query(query, conn, params=(target_tenant, lista_exclusiones))
             
         conn.close()
         
         if not df.empty:
             df['fecha'] = df['fecha'].astype(str)
+            df['categoria'] = df['categoria'].astype(str).str.strip()
+            
+            # 🛡️ SOLUCIÓN AL BUG DE CLASIFICACIÓN BAJA (Capa de Seguridad Inmutable):
+            # Analizamos la categoría real y si es un ataque flagrante, forzamos el escalado de severidad
+            def forzar_severidad_minima(row):
+                cat = row['categoria'].upper()
+                if "BRUTE" in cat or "FORCE" in cat or "XSS" in cat or "SCRIPT" in cat or "SQL" in cat or "INJECTION" in cat or "TRAVERSAL" in cat or "RCE" in cat:
+                    if "SQL" in cat or "RCE" in cat or "EXECUTION" in cat:
+                        return "CRÍTICO"
+                    return "ALTO"
+                return row['nivel_riesgo']
+                
+            df['nivel_riesgo'] = df.apply(forzar_severidad_minima, axis=1)
             
         return df
     except Exception as e:
@@ -283,7 +301,7 @@ m1, m2, m3 = st.columns(3)
 with m1:
     st.markdown(f"""
         <div style="background-color: {bg_card}; padding: 20px; border-radius: 6px; border: 1px solid {border_color};">
-            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Total Incidentes Registrados</div>
+            <div style="font-size: 13px; color: {text_muted}; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;">Total Incidentes Reales</div>
             <div style="font-size: 40px; font-weight: 800; color: #FF0033; margin-top: 5px; letter-spacing: -1px;">{total_incidentes}</div>
         </div>
     """, unsafe_allow_html=True)
@@ -306,14 +324,14 @@ with m3:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# 🎯 CONFIGURACIÓN DE COLORES ALINEADA EXACTAMENTE CON BRAIN.PY (Mapeo estricto de Strings)
 color_map = {
-    "Brute Force Attack": "#FF0033",
-    "SQL Injection (SQLi)": "#80001A",
+    "Brute Force": "#FF0033",
+    "SQL Injection": "#80001A",
     "Cross-Site Scripting (XSS)": "#0066FF",
     "Directory Traversal": "#EAB308",  
     "Remote Code Execution (RCE)": "#FF6600",
     "SSRF Attack": "#71717A",
-    "Tráfico Rutinario": "#10B981",
     "Anomalía de Red detectada por IA": "#444444"
 }
 
@@ -330,7 +348,7 @@ if df.empty:
         </div>
     """, unsafe_allow_html=True)
 else:
-    # --- COLUMNAS RESPONSIVE OPTIMIZADAS (SOLO SE RENDERIZAN SI HAY EVENTOS) ---
+    # --- COLUMNAS RESPONSIVE OPTIMIZADAS ---
     c1, c2 = st.columns([1, 1.2])
 
     with c1:
@@ -381,7 +399,7 @@ else:
         html_puro = df_vista.to_html(index=False, escape=False, classes="tabla-soc")
         st.markdown(f'<div class="tabla-soc-container">{html_puro}</div>', unsafe_allow_html=True)
 
-    # --- 🔒 VISOR INTERACTIVO ENCAPSULADO ESTRICTAMENTE ---
+    # --- 🔒 VISOR INTERACTIVO ENCAPSULADO ESTRICTAMENTE DENTRO DEL ELSE ---
     st.markdown("<br><hr>", unsafe_allow_html=True)
     st.markdown(f"<h3 style='color:{text_main}; font-weight:700;'>🔍 Visor Interactivo de Auditoría SOC</h3>", unsafe_allow_html=True)
     
@@ -389,49 +407,52 @@ else:
     opciones_incidentes = df['selector_texto'].tolist()
     
     incidente_seleccionado = st.selectbox("Selecciona un incidente para inspeccionar de manera aislada:", options=opciones_incidentes, index=0)
-    fila_seleccionada = df[df['selector_texto'] == incidente_seleccionado].iloc[0]
     
-    db_riesgo = str(fila_seleccionada['nivel_riesgo']).upper()
-    color_badge = "#EF4444" if "CRÍT" in db_riesgo or "CRIT" in db_riesgo or "ALT" in db_riesgo else ("#F59E0B" if "MED" in db_riesgo else "#10B981")
-    
-    st.markdown(f"""
-        <div style="background-color: {bg_card}; padding: 25px; border-radius: 6px; border-left: 5px solid {color_badge}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color}; margin-top: 15px;">
-            <h4 style="color: {text_main}; margin-top:0; font-weight:800; letter-spacing:0.5px;">🛡️ REPORTE DE AUDITORÍA: {fila_seleccionada['categoria'].upper()}</h4>
-            <p style="color: {text_muted}; font-size:14px; margin-bottom:15px;">Tenant Auditado: <b>{fila_seleccionada['empresa_name']}</b></p>
-            <table style="width:100%; color:{text_main}; font-size:14px; border-collapse: collapse;">
-                <tr>
-                    <td style="padding: 6px 0; color:{text_muted}; width:25%;"><b>Fecha y Hora:</b></td>
-                    <td>{fila_seleccionada['fecha']}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 6px 0; color:{text_muted};"><b>IP de Origen:</b></td>
-                    <td style="color:#EF4444; font-family:monospace; font-weight:700;">{fila_seleccionada['ip_origen']}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 6px 0; color:{text_muted};"><b>Estado Perimetral:</b></td>
-                    <td><span style="background-color:{"#E4E4E7" if st.session_state.tema_claro else "#18181B"}; padding: 2px 8px; border-radius:4px; font-weight:bold;">{fila_seleccionada['estado_perimetral']}</span></td>
-                </tr>
-                <tr>
-                    <td style="padding: 6px 0; color:{text_muted};"><b>Nivel de Riesgo:</b></td>
-                    <td><span style="color:{color_badge}; font-weight:bold;">🚨 {fila_seleccionada['nivel_riesgo']}</span></td>
-                </tr>
-                <tr>
-                    <td style="padding: 6px 0; color:{text_muted};"><b>Orquestación SOAR:</b></td>
-                    <td style="color:#60A5FA; font-weight:bold;">{fila_seleccionada['soar_active']}</td>
-                </tr>
-            </table>
-            <br>
-            <div style="background-color: {code_bg}; padding: 15px; border-radius: 4px; border: 1px solid {border_color};">
-                <span style="color: {text_muted}; font-size: 12px; display:block; margin-bottom:5px;">LOG DE TELEMETRÍA CRUDO RECOLECTADO:</span>
-                <code style="color: #F43F5E; font-size:13px; word-break: break-all; font-family:monospace;">{fila_seleccionada['log_original']}</code>
+    # Verificación defensiva antes de renderizar la tarjeta detallada inferior
+    if incidente_seleccionado in df['selector_texto'].values:
+        fila_seleccionada = df[df['selector_texto'] == incidente_seleccionado].iloc[0]
+        
+        db_riesgo = str(fila_seleccionada['nivel_riesgo']).upper()
+        color_badge = "#EF4444" if "CRÍT" in db_riesgo or "CRIT" in db_riesgo or "ALT" in db_riesgo else ("#F59E0B" if "MED" in db_riesgo else "#10B981")
+        
+        st.markdown(f"""
+            <div style="background-color: {bg_card}; padding: 25px; border-radius: 6px; border-left: 5px solid {color_badge}; border-top: 1px solid {border_color}; border-right: 1px solid {border_color}; border-bottom: 1px solid {border_color}; margin-top: 15px;">
+                <h4 style="color: {text_main}; margin-top:0; font-weight:800; letter-spacing:0.5px;">🛡️ REPORTE DE AUDITORÍA: {fila_seleccionada['categoria'].upper()}</h4>
+                <p style="color: {text_muted}; font-size:14px; margin-bottom:15px;">Tenant Auditado: <b>{fila_seleccionada['empresa_name']}</b></p>
+                <table style="width:100%; color:{text_main}; font-size:14px; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 6px 0; color:{text_muted}; width:25%;"><b>Fecha y Hora:</b></td>
+                        <td>{fila_seleccionada['fecha']}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color:{text_muted};"><b>IP de Origen:</b></td>
+                        <td style="color:#EF4444; font-family:monospace; font-weight:700;">{fila_seleccionada['ip_origen']}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color:{text_muted};"><b>Estado Perimetral:</b></td>
+                        <td><span style="background-color:{"#E4E4E7" if st.session_state.tema_claro else "#18181B"}; padding: 2px 8px; border-radius:4px; font-weight:bold;">{fila_seleccionada['estado_perimetral']}</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color:{text_muted};"><b>Nivel de Riesgo:</b></td>
+                        <td><span style="color:{color_badge}; font-weight:bold;">🚨 {fila_seleccionada['nivel_riesgo']}</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color:{text_muted};"><b>Orquestación SOAR:</b></td>
+                        <td style="color:#60A5FA; font-weight:bold;">{fila_seleccionada['soar_active']}</td>
+                    </tr>
+                </table>
+                <br>
+                <div style="background-color: {code_bg}; padding: 15px; border-radius: 4px; border: 1px solid {border_color};">
+                    <span style="color: {text_muted}; font-size: 12px; display:block; margin-bottom:5px;">LOG DE TELEMETRÍA CRUDO RECOLECTADO:</span>
+                    <code style="color: #F43F5E; font-size:13px; word-break: break-all; font-family:monospace;">{fila_seleccionada['log_original']}</code>
+                </div>
+                <br>
+                <div style="background-color: {"#E0E7FF" if st.session_state.tema_claro else "#1E1B4B"}; padding: 15px; border-radius: 4px; border: 1px solid {"#C7D2FE" if st.session_state.tema_claro else "#312E81"};">
+                    <span style="color: {"#4338CA" if st.session_state.tema_claro else "#C7D2FE"}; font-size: 12px; display:block; margin-bottom:5px;">DICTAMEN DEL MOTOR DE INTELIGENCIA ARTIFICIAL SAKTISHIELD AI (brain.py):</span>
+                    <p style="color: {"#1E1B4B" if st.session_state.tema_claro else "#E0E7FF"}; font-size:14px; margin:0; line-height:1.5;">{fila_seleccionada['analisis_ia']}</p>
+                </div>
             </div>
-            <br>
-            <div style="background-color: {"#E0E7FF" if st.session_state.tema_claro else "#1E1B4B"}; padding: 15px; border-radius: 4px; border: 1px solid {"#C7D2FE" if st.session_state.tema_claro else "#312E81"};">
-                <span style="color: {"#4338CA" if st.session_state.tema_claro else "#C7D2FE"}; font-size: 12px; display:block; margin-bottom:5px;">DICTAMEN DEL MOTOR DE INTELIGENCIA ARTIFICIAL SAKTISHIELD AI (brain.py):</span>
-                <p style="color: {"#1E1B4B" if st.session_state.tema_claro else "#E0E7FF"}; font-size:14px; margin:0; line-height:1.5;">{fila_seleccionada['analisis_ia']}</p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
 # 📡 Sincronización en caliente activa cada 3 segundos
 time.sleep(3)

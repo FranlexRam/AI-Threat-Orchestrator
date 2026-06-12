@@ -8,7 +8,14 @@ services:
       dockerfile: Dockerfile.backend
     ports:
       - "8000:8000"
-    # 🟢 INYECTAMOS LAS VARIABLES DE ENTORNO (Token de Telegram y Chat ID)
+    # 🟢 NUEVO: Inyectamos las variables explícitas para que el backend sepa conectarse a Postgres
+    environment:
+      - DB_HOST=saktishield-db
+      - DB_NAME=saktishield_production
+      - DB_USER=sakti_admin
+      - DB_PASSWORD=SaktiSecurePassword2026!
+      - DB_PORT=5432
+    # 🟢 INYECTAMOS LAS VARIABLES DE ENTORNO ADICIONALES (Token de Telegram y Chat ID)
     env_file:
       - .env
     # 🔗 Esto le permite al contenedor hablar con el Ollama de tu Mac
@@ -16,7 +23,7 @@ services:
       - "host.docker.internal:host-gateway"
     # 💾 Esto evita que la base de datos se borre al reiniciar, arreglando la correlación
     volumes:
-      - ./security_vault.db:/app/security_vault.db  # Compartimos la DB local para que no se borren los datos al apagar el contenedor
+      - ./security_vault.db:/app/security_vault.db  
       - ./blacklist.txt:/app/blacklist.txt
     depends_on:
       - saktishield-db  # 🐘 Forzamos a que la base de datos levante antes que el backend
