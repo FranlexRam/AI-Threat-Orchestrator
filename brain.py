@@ -98,23 +98,39 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50", empresa_name="Empresa A
     nivel_riesgo = "BAJO"
     decision = "PERMITIR"
 
-    # 🎯 CONTROL ESTRICTO PERIMETRAL: Mapeo duro para evitar falsos negativos del modelo 1B
-    if "SELECT" in log_upper or "UNION" in log_upper or "OR 1=1" in log_upper:
+    # 🎯 CONTROL ESTRICTO PERIMETRAL: Mapeo duro para evitar falsos negativos/alucinaciones del modelo 1B
+    
+    # Firma 1: SSRF (Prioridad absoluta sobre firmas de red genéricas)
+    if any(k in log_upper for k in ["127.0.0.1", "LOCALHOST", "METADATA/V1", "INSTANCE/DATA", "169.254.169.254"]):
+        categoria_detectada = "Server-Side Request Forgery (SSRF)"
+        nivel_riesgo = "CRÍTICO"
+        decision = "BLOQUEAR"
+        
+    # Firma 2: SQL Injection (Robustecida para evitar falsos positivos de RCE)
+    elif "SELECT" in log_upper or "UNION" in log_upper or "OR 1=1" in log_upper or "CONCAT(" in log_upper or "INFORMATION_SCHEMA" in log_upper:
         categoria_detectada = "SQL Injection"
         nivel_riesgo = "CRÍTICO"
         decision = "BLOQUEAR"
+        
+    # Firma 3: Remote Code Execution (RCE)
+    elif any(k in log_upper for k in ["WHOAMI", "NC -E", "/BIN/BASH", "CMD.EXE", "EXEC(", "SYSTEM("]):
+        categoria_detectada = "Remote Code Execution (RCE)"
+        nivel_riesgo = "CRÍTICO"
+        decision = "BLOQUEAR"
+        
+    # Firma 4: Cross-Site Scripting (XSS)
     elif "SCRIPT" in log_upper or "XSS" in log_upper or "<SCRIPT>" in log_upper or "ALERT(" in log_upper:
         categoria_detectada = "Cross-Site Scripting (XSS)"
         nivel_riesgo = "ALTO"
         decision = "BLOQUEAR"
-    elif any(k in log_upper for k in ["FAILED LOGIN", "INVALID CREDENTIALS", "ACCESS DENIED", "AUTH_FAILURE"]):
+        
+    # Firma 5: Brute Force (Captura estricta para evitar evasión como tráfico legítimo)
+    elif any(k in log_upper for k in ["FAILED LOGIN", "INVALID CREDENTIALS", "ACCESS DENIED", "AUTH_FAILURE", "LOGIN_ATTEMPT"]):
         categoria_detectada = "Brute Force"
         nivel_riesgo = "MEDIO"
         decision = "EVALUAR"
-    elif any(k in log_upper for k in ["WHOAMI", "NC -E", "/BIN/BASH", "CMD.EXE"]):
-        categoria_detectada = "Remote Code Execution (RCE)"
-        nivel_riesgo = "CRÍTICO"
-        decision = "BLOQUEAR"
+        
+    # Firma 6: Directory Traversal
     elif ".." in log_upper or "/ETC/PASSWD" in log_upper:
         categoria_detectada = "Directory Traversal"
         nivel_riesgo = "ALTO"
@@ -126,7 +142,7 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50", empresa_name="Empresa A
             "Analiza el siguiente log de un entorno web corporativo. Determina de manera estricta si es un ataque o tráfico legítimo.\n"
             f"Log: {log_decoded}\n\n"
             "Responde EXCLUSIVAMENTE en formato JSON plano con la siguiente estructura:\n"
-            '{"categoria": "Nombre Exacto (SQL Injection, Remote Code Execution (RCE), Cross-Site Scripting (XSS), Directory Traversal, Brute Force, Tráfico Legítimo)", '
+            '{"categoria": "Nombre Exacto (SQL Injection, Remote Code Execution (RCE), Cross-Site Scripting (XSS), Directory Traversal, Brute Force, Server-Side Request Forgery (SSRF), Tráfico Legítimo)", '
             '"riesgo": "CRÍTICO, ALTO, MEDIO o BAJO", '
             '"decision": "BLOQUEAR o PERMITIR"}'
         )
@@ -158,7 +174,7 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50", empresa_name="Empresa A
             print(f"[⚠️ CORRELACIÓN]: Ráfaga detectada ({intentos_fallidos + 1} intentos). Escalando a BLOQUEO.")
         else:
             nivel_riesgo = "MEDIO"
-            decision = "PERMITIR"
+            decision = "EVALUAR"
 
     contexto_correlacion = (
         f"IP sospechosa con {len(historial_previo)} anomalías previas detectadas."
@@ -196,7 +212,6 @@ def orchestrator_ai(log_entry, client_ip="192.168.1.50", empresa_name="Empresa A
     if decision == "BLOQUEAR":
         status = "BLOQUEADO"
         simulate_firewall_block(client_ip, f"Orquestación SOAR: {categoria_detectada}")
-        # 🔔 CORRECCIÓN DEL DISPARADOR: Si es bloqueado por firma o IA, se envía la alerta real
         send_telegram_alert(categoria_detectada, soar_riesgo, client_ip)
     else:
         status = "PERMITIDO" if categoria_detectada in ["Tráfico Legítimo", "Tráfico Rutinario"] else "REVISIÓN"
