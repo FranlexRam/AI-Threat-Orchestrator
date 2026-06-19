@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pydantic
 import json
-from brain import orchestrator_ai
+from brain import orchestrator_ai, send_telegram_alert  # 🚀 Importación del webhook de alerta
 import sqlite3
 
 # Inicializamos la plataforma API SaaS Enterprise
@@ -191,6 +191,14 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
                 conn_pg.commit()
                 cursor_pg.close()
                 conn_pg.close()
+                
+                # 🎯 [FIX INTEGRADO]: Disparo instantáneo al bot de Telegram
+                try:
+                    send_telegram_alert(categoria=tipo_ataque, riesgo="CRÍTICO", ip=ip_cliente)
+                    print(f"[📬 TELEGRAM]: Alerta perimetral de Fuerza Bruta enviada para {empresa_cliente}.")
+                except Exception as tel_err:
+                    print(f"❌ Error al despachar el Telegram de Fuerza Bruta: {tel_err}")
+
             except Exception as db_err:
                 print(f"❌ Error guardando fuerza bruta estática en Postgres: {db_err}")
 

