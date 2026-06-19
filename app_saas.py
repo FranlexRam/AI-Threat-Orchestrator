@@ -242,7 +242,14 @@ def cargar_datos_pg(target_tenant, rol):
         conn = obtener_conexion_pg()
         
         # 🛡️ SOLUCIÓN AL BUG FANTASMA: Ampliamos las exclusiones de strings exactos para purgar todo el tráfico benigno
-        lista_exclusiones = ('Tráfico Legítimo', 'Tráfico Rutinario', 'Tráfico Legítimo (Rutinario)', 'Tráfico legítimo')
+        lista_exclusiones = (
+            'Tráfico Legítimo', 
+            'Tráfico Rutinario', 
+            'Tráfico Legítimo (Rutinario)', 
+            'Tráfico legítimo',
+            'Anomalía de Red detectada por IA',
+            'Anomalía de red detectada por IA'
+        )
         
         if rol == "SUPERADMIN" and target_tenant == "TODOS LOS CLIENTES":
             query = """
@@ -250,7 +257,7 @@ def cargar_datos_pg(target_tenant, rol):
                        alerta_status AS estado_perimetral, nivel_riesgo, tipo_ataque AS categoria, 
                        log_entry AS log_original, soar_active, empresa_name 
                 FROM sakti_incidents 
-                WHERE tipo_ataque NOT IN %s
+                WHERE tipo_ataque NOT IN %s AND tipo_ataque NOT LIKE '%%Legítimo%%' AND tipo_ataque NOT LIKE '%%Anomalía%%'
                 ORDER BY created_at DESC
             """
             df = pd.read_sql_query(query, conn, params=(lista_exclusiones,))
@@ -260,7 +267,7 @@ def cargar_datos_pg(target_tenant, rol):
                        alerta_status AS estado_perimetral, nivel_riesgo, tipo_ataque AS categoria, 
                        log_entry AS log_original, soar_active, empresa_name 
                 FROM sakti_incidents 
-                WHERE empresa_name = %s AND tipo_ataque NOT IN %s
+                WHERE empresa_name = %s AND tipo_ataque NOT IN %s AND tipo_ataque NOT LIKE '%%Legítimo%%' AND tipo_ataque NOT LIKE '%%Anomalía%%'
                 ORDER BY created_at DESC
             """
             df = pd.read_sql_query(query, conn, params=(target_tenant, lista_exclusiones))
@@ -271,12 +278,24 @@ def cargar_datos_pg(target_tenant, rol):
             df['fecha'] = df['fecha'].astype(str)
             df['categoria'] = df['categoria'].astype(str).str.strip()
             
-            # 🛡️ SOLUCIÓN AL BUG DE CLASIFICACIÓN BAJA (Capa de Seguridad Inmutable):
-            # Analizamos la categoría real y si es un ataque flagrante, forzamos el escalado de severidad
+            # Normalización forzada para corregir la visualización de SQLi y evitar que se agrupe como RCE
+            def normalizar_categorias(row):
+                cat = row['categoria']
+                if "SQL" in cat.upper():
+                    return "SQL Injection (SQLi)"
+                if "BRUTE" in cat.upper() or "FORCE" in cat.upper():
+                    return "Brute Force Attack"
+                if "SSRF" in cat.upper():
+                    return "SSRF Attack"
+                return cat
+
+            df['categoria'] = df.apply(normalizar_categorias, axis=1)
+
+            # Capa de Seguridad Inmutable para Severidades
             def forzar_severidad_minima(row):
                 cat = row['categoria'].upper()
-                if "BRUTE" in cat or "FORCE" in cat or "XSS" in cat or "SCRIPT" in cat or "SQL" in cat or "INJECTION" in cat or "TRAVERSAL" in cat or "RCE" in cat:
-                    if "SQL" in cat or "RCE" in cat or "EXECUTION" in cat:
+                if "BRUTE" in cat or "FORCE" in cat or "XSS" in cat or "SQL" in cat or "TRAVERSAL" in cat or "RCE" in cat:
+                    if "SQL" in cat or "RCE" in cat:
                         return "CRÍTICO"
                     return "ALTO"
                 return row['nivel_riesgo']
@@ -324,15 +343,14 @@ with m3:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 🎯 CONFIGURACIÓN DE COLORES ALINEADA EXACTAMENTE CON BRAIN.PY (Mapeo estricto de Strings)
+# 🎯 CONFIGURACIÓN DE COLORES ALINEADA EXACTAMENTE CON LA INGESTA (Mapeo estricto)
 color_map = {
-    "Brute Force": "#FF0033",
-    "SQL Injection": "#80001A",
+    "Brute Force Attack": "#FF0033",
+    "SQL Injection (SQLi)": "#80001A",
     "Cross-Site Scripting (XSS)": "#0066FF",
     "Directory Traversal": "#EAB308",  
     "Remote Code Execution (RCE)": "#FF6600",
-    "SSRF Attack": "#71717A",
-    "Anomalía de Red detectada por IA": "#444444"
+    "SSRF Attack": "#71717A"
 }
 
 # --- CONTROL MULTI-TENANT DE RENDERIZADO VISUAL EN BASE A DATA ---
