@@ -85,10 +85,6 @@ Para ti (SuperAdmin): Al loguearse, verás el panel máster. Tu dona mostrará e
 
 
 📅 Agenda para la Próxima Sesión
-🧩 1. El 7mo Vector: Inyección del Módulo DDoS
-Objetivo: Modificar api_ingest.py para medir la tasa global de peticiones concurrentes por segundo en la RAM (HISTORIAL_CONEXIONES), independientemente de las palabras clave del log.
-
-Resultado: Mitigar ataques masivos simulados y balancear el Dashboard con la séptima porción del gráfico en tiempo real.
 
 🏢 2. Construcción de la Mini-Web Vulnerable (/vulnerable-client-demo)
 Objetivo: Crear una aplicación pequeña con un servidor backend real y liviano (como Flask o Node.js) dentro de tu mismo repositorio.
@@ -98,4 +94,47 @@ Diseño: Sembrar de forma intencional las fallas lógicas (consultas SQL concate
 🔌 3. Integración del Middleware de SaktiShield
 Objetivo: Escribir el SDK/Middleware (el interceptor) e inyectarlo en la mini-web usando tu X-Sakti-Token corporativo.
 
-La Prueba de Fuego: Lanzar ataques reales desde el navegador o herramientas directas al sitio web y ver cómo tu orquestador asume la defensa total en el perímetro, congelando las amenazas antes de que toquen la aplicación.
+
+
+----------------------------------------
+
+PUNTO 2: Condiciones del Mini-Web Vulnerable (vulnerable-client-demo)
+
+💣 Las 7 Vulnerabilidades que debemos sembrar (para poder atacarlas)
+Para demostrar los 7 vectores que tienes mapeados en tu Dashboard, configuraremos el sitio web con los siguientes "errores de programación" controlados:
+
+1. Brute Force Attack
+La condición en el sitio: El formulario de login no debe tener políticas de bloqueo de cuenta ni rate-limiting nativo. Debe permitir que cualquiera intente loguearse infinitas veces.
+
+La demostración: Al mandar la ráfaga con el simulador, el sitio web dejará pasar los primeros dos intentos, pero al tercero, tu motor de correlación temporal lo detectará en la RAM, activará el bloqueo perimetral y el sitio web pintará el "Acceso Denegado".
+
+2. SQL Injection (SQLi)
+La condición en el sitio: Crearemos un buscador de productos donde la consulta SQL se construya concatenando texto directamente, sin usar parámetros seguros:
+query = f"SELECT * FROM productos WHERE id = '{id_solicitado}'"
+
+La demostración: Al atacar con un payload como ' OR 1=1 --, tu API detendrá la petición en el aire antes de que llegue a tocar esa consulta rota, salvando la base de datos de ser expuesta.
+
+3. Cross-Site Scripting (XSS)
+La condición en el sitio: Un cuadro de comentarios o un buscador que refleje en la pantalla exactamente lo que el usuario escribió, sin limpiar las etiquetas HTML.
+
+La demostración: Intentaremos inyectar <script>alert('Hacked')</script>. Tu software interceptará los caracteres especiales y congelará la carga de la página.
+
+4. Directory Traversal
+La condición en el sitio: Un endpoint que sirva archivos del sistema usando un parámetro de ruta directo, por ejemplo: /ver-archivo?file=imagen.jpg, procesado internamente con un lector de archivos plano.
+
+La demostración: Al simular el ataque intentando leer carpetas raíz (/ver-archivo?file=../../../../etc/passwd), los disparadores web del pipeline bloquearán la solicitud.
+
+5. Remote Code Execution (RCE)
+La condición en el sitio: Una función expuesta en el servidor que interactúe directamente con la consola de comandos del sistema operativo subyacente (por ejemplo, un botón para hacer un "ping" a una IP que use un os.system() directo).
+
+La demostración: Al meter comandos encadenados como ; whoami o ; netcat, saltará la alerta crítica perimetral.
+
+6. Server-Side Request Forgery (SSRF)
+La condición en el sitio: Una función que permita al sitio web "importar una foto de perfil desde una URL externa" usando una librería de peticiones en el backend (como requests.get(url_usuario)).
+
+La demostración: Atacaremos el sitio pidiéndole que consulte las IPs de metadatos internos de AWS/Cloud (169.254.169.254), y el orquestador cortará el flujo de inmediato.
+
+7. Distributed Denial of Service (DDoS)
+La condición en el sitio: El servidor web debe estar configurado de forma sencilla (un solo hilo o proceso Worker) para que sea vulnerable a la saturación por peticiones concurrentes masivas.
+
+La demostración: Aquí es donde brillará el nuevo cambio que planeamos para la próxima sesión. Lanzaremos cientos de peticiones simultáneas desde el simulador. Tu motor perimetral identificará el pico anómalo de tráfico por segundo global y empezará a descartar las conexiones maliciosas en el perímetro para mantener el sitio web real completamente en línea y ligero para los usuarios legítimos.
