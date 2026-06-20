@@ -81,3 +81,21 @@ elif user_rol == "CLIENT_ADMIN":
 Para tu Cliente (Empresa Alfa C.A.): Al loguearse, el Dashboard calculará las métricas (Incidentes Totales, IPs Bloqueadas) y pintará la dona de Plotly únicamente con los datos filtrados para su empresa. No sabrá ni tendrá forma de ver si tienes otros 100 clientes en la plataforma. Su entorno es 100% privado.
 
 Para ti (SuperAdmin): Al loguearse, verás el panel máster. Tu dona mostrará el acumulado de todos los ataques combinados del ecosistema. Además, te implementaremos un menú desplegable (Selectbox) en la barra lateral que dirá: "Seleccionar Cliente a Monitorear". Si seleccionas "Todos", ves la torta global; si seleccionas "Empresa Alfa", el dashboard muta en caliente y te muestra exactamente la misma vista restringida que está viendo tu cliente para que puedas auditarlo o darle soporte en tiempo real.
+
+
+
+📅 Agenda para la Próxima Sesión
+🧩 1. El 7mo Vector: Inyección del Módulo DDoS
+Objetivo: Modificar api_ingest.py para medir la tasa global de peticiones concurrentes por segundo en la RAM (HISTORIAL_CONEXIONES), independientemente de las palabras clave del log.
+
+Resultado: Mitigar ataques masivos simulados y balancear el Dashboard con la séptima porción del gráfico en tiempo real.
+
+🏢 2. Construcción de la Mini-Web Vulnerable (/vulnerable-client-demo)
+Objetivo: Crear una aplicación pequeña con un servidor backend real y liviano (como Flask o Node.js) dentro de tu mismo repositorio.
+
+Diseño: Sembrar de forma intencional las fallas lógicas (consultas SQL concatenadas, inputs sin sanitizar y endpoints expuestos a consola) que emulan el código vulnerable generado por desarrolladores novatos o IAs.
+
+🔌 3. Integración del Middleware de SaktiShield
+Objetivo: Escribir el SDK/Middleware (el interceptor) e inyectarlo en la mini-web usando tu X-Sakti-Token corporativo.
+
+La Prueba de Fuego: Lanzar ataques reales desde el navegador o herramientas directas al sitio web y ver cómo tu orquestador asume la defensa total en el perímetro, congelando las amenazas antes de que toquen la aplicación.

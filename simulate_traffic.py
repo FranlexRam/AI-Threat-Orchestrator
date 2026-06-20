@@ -35,6 +35,10 @@ PAYLOADS_ATAQUE = {
         "log": "GET /fetch?url=http://169.254.169.254/latest/meta-data/local-ipv4 HTTP/1.1"
     },
     "7": {
+        "tipo": "DDoS Attack (Saturación de Botnet)", 
+        "log": "GET /index.html HTTP/1.1 - Inundación de tráfico volumétrico distribuído"
+    },
+    "8": {
         "tipo": "Tráfico Legítimo (Rutinario)",
         "log": "GET /index.html HTTP/1.1 - Host: website.com - Status 200 OK - User-Agent: Mozilla/5.0"
     }
@@ -70,7 +74,7 @@ def enviar_trafico(token_cliente, nombre_cliente, payload_log, tipo_ataque, ip_f
         "Content-Type": "application/json"
     }
     
-    # Si pasamos una IP fija (Fuerza Bruta), la mantiene. Si no, genera una aleatoria (Web Exploits).
+    # Si pasamos una IP fija (Fuerza Bruta), la mantiene. Si no, genera una aleatoria (Web Exploits / DDoS).
     ip_final = ip_fija if ip_fija else f"{random.randint(50,220)}.{random.randint(10,250)}.{random.randint(1,254)}.{random.randint(1,254)}"
     
     data = {
@@ -129,19 +133,21 @@ def menu():
         for k, v in PAYLOADS_ATAQUE.items():
             print(f" [{k}] {v['tipo']}")
             
-        opcion_payload = input("\n👉 Elige el vector (1-7): ").strip()
+        opcion_payload = input("\n👉 Elige el vector (1-8): ").strip()
         if opcion_payload not in PAYLOADS_ATAQUE:
             print("❌ Vector inválido. Operación cancelada.")
             continue
             
         payload_elegido = PAYLOADS_ATAQUE[opcion_payload]
         
-        # 🎯 LÓGICA LOGÍSTICA DE FUERZA BRUTA DE SAKTI
+        # ====================================================================
+        # 🎯 BLOQUE LOGÍSTICO DE DISPARO SEGÚN EL VECTOR SELECCIONADO
+        # ====================================================================
         if opcion_payload == "1":
             print("\n🚀 [RÁFAGA] Iniciando simulación de ataque de Fuerza Bruta distribuido temporalmente...")
             ip_ataque_bruto = f"{random.randint(50,220)}.{random.randint(10,250)}.{random.randint(1,254)}.{random.randint(1,254)}"
             
-            # Lanzamos 4 intentos seguidos con la misma IP para obligar a saltar el umbral (>=2 anteriores + el actual)
+            # Lanzamos 4 intentos seguidos con la misma IP para obligar a saltar el umbral
             for intento in range(1, 5):
                 print(f"\n[Intento {intento}/4]")
                 log_con_intento = f"{payload_elegido['log']} {intento}/4"
@@ -156,8 +162,27 @@ def menu():
                     print(f"💥 [ÉXITO SOAR]: El orquestador ha bloqueado la IP {ip_ataque_bruto} en el intento {intento}.")
                     break
                 time.sleep(1) # Pequeña pausa de red entre ráfagas
+
+        elif opcion_payload == "7":
+            print(f"\n⚡ [BOTNET ACTIVADA]: Lanzando ráfaga volumétrica DDoS contra {cliente_elegido['nombre']}...")
+            # Simulamos 15 peticiones ultra rápidas viniendo de IPs totalmente diferentes para emular una botnet distribuida
+            for i in range(1, 16):
+                ip_bot = f"{random.randint(50,220)}.{random.randint(10,250)}.{random.randint(1,254)}.{random.randint(1,254)}"
+                log_ddos = f"{payload_elegido['log']} - Bot #{i}"
+                
+                decision = enviar_trafico(
+                    token_cliente=cliente_elegido["token"],
+                    nombre_cliente=cliente_elegido["nombre"],
+                    payload_log=log_ddos,
+                    tipo_ataque=payload_elegido["tipo"],
+                    ip_fija=ip_bot
+                )
+                # Ejecución en ráfaga continua (sin time.sleep) para saturar el control de 2 segundos del backend
+                
+            print("\n💥 [FIN DE LA RÁFAGA]: Revisa tu Dashboard y tu Telegram para verificar la mitigación.")
+
         else:
-            # Flujo estándar para vectores web unitarios (SQLi, XSS, SSRF, RCE...)
+            # Flujo estándar para vectores web unitarios (SQLi, XSS, SSRF, RCE, Legítimo...)
             enviar_trafico(
                 token_cliente=cliente_elegido["token"],
                 nombre_cliente=cliente_elegido["nombre"],

@@ -111,12 +111,24 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         
         print(f"\n[🔑 AUTENTICADO]: Tráfico recibido de cliente SaaS: -> {empresa_cliente}")
         
+        # 🧠 1. MOTOR DE CORRELACIÓN EN RAM (Por IP para Fuerza Bruta)
         if ip_cliente not in HISTORIAL_CONEXIONES:
             HISTORIAL_CONEXIONES[ip_cliente] = []
         
         HISTORIAL_CONEXIONES[ip_cliente] = [t for t in HISTORIAL_CONEXIONES[ip_cliente] if (ahora - t).total_seconds() <= 60]
         HISTORIAL_CONEXIONES[ip_cliente].append(ahora)
         peticiones_en_ventana = len(HISTORIAL_CONEXIONES[ip_cliente])
+
+        # 🌊 2. CONTROL GLOBAL MULTI-TENANT (Para detección de DDoS por Empresa)
+        if not hasattr(app.state, "global_traffic"):
+            app.state.global_traffic = {}
+            
+        if empresa_cliente not in app.state.global_traffic:
+            app.state.global_traffic[empresa_cliente] = []
+            
+        app.state.global_traffic[empresa_cliente] = [t for t in app.state.global_traffic[empresa_cliente] if (ahora - t).total_seconds() <= 2]
+        app.state.global_traffic[empresa_cliente].append(ahora)
+        peticiones_globales_2s = len(app.state.global_traffic[empresa_cliente])
         
         log_decoded = urllib.parse.unquote(log_crudo).replace('+', ' ')
         log_upper = log_decoded.upper()
@@ -124,6 +136,9 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         # 🎯 DETECCIÓN EXPANDIDA DE FUERZA BRUTA Y VECTORES DE ATAQUE
         es_intento_fallido = any(k in log_upper for k in ["FAILED LOGIN", "INVALID CREDENTIALS", "AUTH_FAILURE", "ACCESS DENIED", "LOGIN_ATTEMPT"])
         fuerza_bruta_detectada = es_intento_fallido and peticiones_en_ventana >= 3
+
+        # 🔥 NUEVA REGLA PERIMETRAL: Mitigación DDoS activa
+        ddos_detectado = peticiones_globales_2s >= 10
 
         disparadores_rce = ["WHOAMI", "NC -E", "/BIN/BASH", "CMD.EXE", "EXEC(", "SYSTEM("]
         disparadores_ssrf = ["169.254.169.254", "METADATA", "INSTANCE/DATA"]
@@ -136,7 +151,7 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         detectado_web = any(patron in log_upper for patron in disparadores_web_general)
         
         # Evaluación perimetral estricta
-        requiere_ia = detectado_rce or detectado_ssrf or detectado_sqli or detectado_web or fuerza_bruta_detectada
+        requiere_ia = detectado_rce or detectado_ssrf or detectado_sqli or detectado_web or fuerza_bruta_detectada or ddos_detectado
         
         # Flujo A: Tráfico Rutinario / Legítimo Puro (NO SE GUARDA EN LA DB PARA NO ENSUCIAR EL SOC)
         if not requiere_ia:
@@ -153,17 +168,21 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         # Flujo B: Alerta Perimetral Activada -> Escalabilidad a Motor de IA / Correlación Temporal
         print(f"[🚀 API PIPELINE]: Alerta perimetral activada para {empresa_cliente} (IP {ip_cliente}). Escalando...")
         
-        if fuerza_bruta_detectada:
+        # 🧠 SECCIÓN DE DECISIONES
+        if ddos_detectado:
+            resultado_brain = f"BLOQUEADO - CRÍTICO (Mitigación DDoS Activa: {peticiones_globales_2s} req/2s detectadas en el perímetro)"
+        elif fuerza_bruta_detectada:
             resultado_brain = f"BLOQUEADO - CRÍTICO (Ataque Masivo de Fuerza Bruta Detectado por Ventana Temporal: {peticiones_en_ventana} solicitudes/min)"
         else:
-            # Transferimos la ejecución completa a brain.py pasándole las banderas perimetrales limpias
             resultado_brain = orchestrator_ai(log_crudo, client_ip=ip_cliente, empresa_name=empresa_cliente)
         
         # Parser rápido para el estado del streaming en vivo
         status_final = "BLOQUEADO" if "BLOQUEADO" in resultado_brain.upper() else "REVISIÓN"
 
         # Clasificación exacta y ordenada para el WebSocket en tiempo real del Dashboard
-        if fuerza_bruta_detectada or "BRUTE" in resultado_brain.upper() or "FORCE" in resultado_brain.upper():
+        if ddos_detectado or "DDOS" in resultado_brain.upper():
+            tipo_ataque = "DDoS Attack"
+        elif fuerza_bruta_detectada or "BRUTE" in resultado_brain.upper() or "FORCE" in resultado_brain.upper():
             tipo_ataque = "Brute Force Attack"
         elif "SQL" in resultado_brain.upper() or detectado_sqli:
             tipo_ataque = "SQL Injection (SQLi)"
@@ -178,8 +197,8 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
         else:
             tipo_ataque = "Ataque Indefinido"
 
-        # Si fue procesado por el bloque estático de fuerza bruta local de la API, se persiste aquí
-        if fuerza_bruta_detectada:
+        # Si fue procesado por mitigación estática perimetral (Fuerza Bruta o DDoS), se persiste aquí
+        if fuerza_bruta_detectada or ddos_detectado:
             try:
                 conn_pg = obtener_conexion_db()
                 cursor_pg = conn_pg.cursor()
@@ -192,15 +211,15 @@ async def ingestar_log_corporativo(payload: LogPayload, empresa_cliente: str = S
                 cursor_pg.close()
                 conn_pg.close()
                 
-                # 🎯 [FIX INTEGRADO]: Disparo instantáneo al bot de Telegram
+                # Disparo instantáneo al bot de Telegram
                 try:
                     send_telegram_alert(categoria=tipo_ataque, riesgo="CRÍTICO", ip=ip_cliente)
-                    print(f"[📬 TELEGRAM]: Alerta perimetral de Fuerza Bruta enviada para {empresa_cliente}.")
+                    print(f"[📬 TELEGRAM]: Alerta perimetral de {tipo_ataque} enviada para {empresa_cliente}.")
                 except Exception as tel_err:
-                    print(f"❌ Error al despachar el Telegram de Fuerza Bruta: {tel_err}")
+                    print(f"❌ Error al despachar el Telegram de {tipo_ataque}: {tel_err}")
 
             except Exception as db_err:
-                print(f"❌ Error guardando fuerza bruta estática en Postgres: {db_err}")
+                print(f"❌ Error guardando mitigación estática en Postgres: {db_err}")
 
         alerta_dashboard = {
             "ip": ip_cliente,
