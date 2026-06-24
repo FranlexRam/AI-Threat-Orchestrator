@@ -138,3 +138,5 @@ La demostración: Atacaremos el sitio pidiéndole que consulte las IPs de metada
 La condición en el sitio: El servidor web debe estar configurado de forma sencilla (un solo hilo o proceso Worker) para que sea vulnerable a la saturación por peticiones concurrentes masivas.
 
 La demostración: Aquí es donde brillará el nuevo cambio que planeamos para la próxima sesión. Lanzaremos cientos de peticiones simultáneas desde el simulador. Tu motor perimetral identificará el pico anómalo de tráfico por segundo global y empezará a descartar las conexiones maliciosas en el perímetro para mantener el sitio web real completamente en línea y ligero para los usuarios legítimos.
+
+Haremos nuevos cambios!!
